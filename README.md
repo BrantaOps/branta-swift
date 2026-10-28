@@ -22,12 +22,6 @@ targets: [
 
 Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 3.2.3.
 
-CocoaPods:
-
-```ruby
-pod 'Branta', '~> 3.2.3'
-```
-
 # Integration Guide
 
 If you are an AI agent implementing this SDK, follow the steps below exactly. If you are a developer, use this as a reference for the recommended integration patterns.
@@ -237,14 +231,9 @@ func isAPIKeyValid(options: BrantaClientOptions?) async throws -> Bool
 
 # Publishing
 
-1. Bump `s.version` in `Branta.podspec` and add a changelog entry.
-2. Tag the release `v3.2.3` (the `v` prefix). Swift Package Manager resolves `from: "3.2.3"` from that tag. CocoaPods uses the same tag via the podspec.
+1. Add a changelog entry and bump the version in the Installation section.
+2. Tag the release `v3.2.3` (the `v` prefix). Swift Package Manager resolves `from: "3.2.3"` from that tag.
 3. Push the tag: `git push origin v3.2.3`
-4. CocoaPods trunk, once, from a machine registered with `pod trunk register`:
-
-```bash
-pod trunk push Branta.podspec
-```
 
 # Tests
 

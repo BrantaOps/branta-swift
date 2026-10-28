@@ -27,4 +27,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HMAC-SHA256 request signing for parent-platform flows.
 - Same-origin checks for platform, parent, and child logo URLs.
 - `getPaymentsByQRCode` rejects a QR whose visible Bitcoin address does not match the address decrypted from `branta_id` / `branta_secret`.
-- Swift Package Manager and CocoaPods.
+- Swift Package Manager.
