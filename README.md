@@ -13,19 +13,19 @@ Swift Package Manager, in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/BrantaOps/branta-swift.git", from: "3.2.2"),
+    .package(url: "https://github.com/BrantaOps/branta-swift.git", from: "3.2.3"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: ["Branta"]),
 ]
 ```
 
-Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 3.2.2.
+Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 3.2.3.
 
 CocoaPods:
 
 ```ruby
-pod 'Branta', '~> 3.2.2'
+pod 'Branta', '~> 3.2.3'
 ```
 
 # Integration Guide
@@ -238,8 +238,8 @@ func isAPIKeyValid(options: BrantaClientOptions?) async throws -> Bool
 # Publishing
 
 1. Bump `s.version` in `Branta.podspec` and add a changelog entry.
-2. Tag the release `v3.2.2` (the `v` prefix). Swift Package Manager resolves `from: "3.2.2"` from that tag. CocoaPods uses the same tag via the podspec.
-3. Push the tag: `git push origin v3.2.2`
+2. Tag the release `v3.2.3` (the `v` prefix). Swift Package Manager resolves `from: "3.2.3"` from that tag. CocoaPods uses the same tag via the podspec.
+3. Push the tag: `git push origin v3.2.3`
 4. CocoaPods trunk, once, from a machine registered with `pod trunk register`:
 
 ```bash

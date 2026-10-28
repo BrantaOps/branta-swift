@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = 'Branta'
-  s.version      = '3.2.2'
+  s.version      = '3.2.3'
   s.summary      = 'Swift SDK for the Branta V2 API'
   s.description  = 'Payment destination lookup and registration with zero-knowledge encryption. For native iOS and macOS apps.'
   s.homepage     = 'https://branta.pro'
