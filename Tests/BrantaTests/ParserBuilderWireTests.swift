@@ -54,6 +54,7 @@ final class QRParserTests: XCTestCase {
         XCTAssertEqual(QRParser("lnbc100n1ptest").destinationType, .bolt11)
         XCTAssertEqual(QRParser("LNURL1TESTVALUE").destinationType, .lnURL)
         XCTAssertEqual(QRParser("ark1testaddress").destinationType, .arkAddress)
+        XCTAssertEqual(QRParser("tark1testaddress").destinationType, .arkAddress)
         XCTAssertEqual(QRParser("sp1testaddress").destinationType, .silentPayment)
         XCTAssertEqual(QRParser("tsp1testaddress").destinationType, .silentPayment)
         XCTAssertEqual(QRParser("0x" + String(repeating: "a", count: 40)).destinationType, .tetherAddress)

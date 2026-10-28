@@ -100,7 +100,8 @@ func isBolt11(_ value: String) -> Bool {
 }
 
 func isArk(_ value: String) -> Bool {
-    value.lowercased().hasPrefix("ark1")
+    let lower = value.lowercased()
+    return lower.hasPrefix("ark1") || lower.hasPrefix("tark1")
 }
 
 func isSilentPayment(_ value: String) -> Bool {
