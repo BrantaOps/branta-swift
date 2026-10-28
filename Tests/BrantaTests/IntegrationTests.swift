@@ -1,6 +1,18 @@
 import XCTest
 @testable import Branta
 
+private struct IntegrationMetricsTransport: HTTPTransporting {
+    private let inner = URLSessionTransport()
+
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        var request = request
+        if let token = ProcessInfo.processInfo.environment["BRANTA_INTEGRATION_METRICS_TOKEN"], !token.isEmpty {
+            request.setValue(token, forHTTPHeaderField: "X-Branta-Integration-Token")
+        }
+        return try await inner.send(request)
+    }
+}
+
 final class IntegrationTests: XCTestCase {
     private let prodOnChain = "bitcoin:bc1qu3k6geqdjncaarsu2vq56tt8php5vsug9kasmq"
     private let prodLightning = "lightning:lnbc17760n1p4r4tqupp5yuapqmxldkc8smuwa6t8shkdg9gezulu0vc7htepfsvweph8kqfsdphgfexzmn5vysygetkv4kx7ur9wgsyc6t8dp6xu6twvusy27rpd4cxcegcqzzsxq97zvuqsp53564rg6w4xjqy7jamcfqxyy83a0j8nzfs0wpevs37t5ln49q6hrs9qxpqysgq47hpqmv34g25le8sceq9jdvul2nz7ucyu0vucv56nlfe40x7n3jsu8duxjrn6tgvdspt872crk9zeatafznm9c57m039z7wyx6g3njsqkchkdh"
@@ -18,7 +30,14 @@ final class IntegrationTests: XCTestCase {
     }
 
     private func service(_ base: BrantaServerBaseURL, _ privacy: PrivacyMode) -> BrantaService {
-        BrantaService(options: BrantaClientOptions(baseURL: base, privacy: privacy))
+        let options = BrantaClientOptions(baseURL: base, privacy: privacy)
+        let client = BrantaClient(defaultOptions: options, transport: IntegrationMetricsTransport())
+        return BrantaService(
+            options: options,
+            client: client,
+            aes: AESEncryptionService(),
+            secretGenerator: GuidSecretGenerator()
+        )
     }
 
     func testProductionLooseOnChain() async throws {
