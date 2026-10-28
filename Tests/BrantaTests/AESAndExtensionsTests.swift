@@ -61,6 +61,8 @@ final class ExtensionTests: XCTestCase {
         XCTAssertFalse(isBolt11("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"))
         XCTAssertTrue(isArk("ark1testaddress"))
         XCTAssertTrue(isArk("ARK1TESTADDRESS"))
+        XCTAssertTrue(isArk("tark1testaddress"))
+        XCTAssertTrue(isArk("TARK1TESTADDRESS"))
         XCTAssertFalse(isArk("bc1qtest"))
         XCTAssertTrue(isSilentPayment("sp1testaddress"))
         XCTAssertTrue(isSilentPayment("tsp1testaddress"))
@@ -70,6 +72,7 @@ final class ExtensionTests: XCTestCase {
     func testHashZKType() {
         XCTAssertEqual(hashZKType(of: "lnbc100n1ptest"), .bolt11)
         XCTAssertEqual(hashZKType(of: "ark1testaddress"), .arkAddress)
+        XCTAssertEqual(hashZKType(of: "tark1testaddress"), .arkAddress)
         XCTAssertEqual(hashZKType(of: "sp1testaddress"), .silentPayment)
         XCTAssertNil(hashZKType(of: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"))
     }
