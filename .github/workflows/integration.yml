@@ -9,6 +9,7 @@ jobs:
   guardrail:
     runs-on: macos-latest
     env:
+      BRANTA_RUN_INTEGRATION: "1"
       BRANTA_INTEGRATION_METRICS_TOKEN: ${{ secrets.BRANTA_INTEGRATION_METRICS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
