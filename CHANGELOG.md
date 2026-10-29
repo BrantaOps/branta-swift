@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- `getPaymentsByQRCode` now requires every payable instruction in a QR code to match a decrypted destination. A swapped address with a rewritten `branta_secret`, an added `lightning` / `ark` / `silent_payment` / `sp` leg, or a conflicting `bc=` / `tb=` no longer comes back as verified; the result has no payments. On-chain addresses from the path, `bc=`, and `tb=` must all agree, otherwise the call throws `tampered`.
+- `bolt12`, `lno=`, `pay=`, and LNURL instructions cannot be bound to a decrypted destination, so the QR returns no payments (no lookup is made). `verifyUrl` is still returned.
+- `tb1` and `bcrt1` addresses are compared case-insensitively, like `bc1`.
+
 ## [3.2.3] - 2026-10-28
 
 ### Added

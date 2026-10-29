@@ -37,16 +37,22 @@ public final class BrantaService {
 
     public func getPaymentsByQRCode(_ qrText: String, options: BrantaClientOptions? = nil) async throws -> PaymentsResult {
         let parser = QRParser(qrText)
+        let expectedOnChain = try uniformOnChainAddress(parser)
+
+        if parser.hasUnverifiableInstruction {
+            let lookup = parser.onChainEncryptionText ?? parser.destination ?? ""
+            return PaymentsResult(payments: [], verifyURL: try buildVerifyURL(options: options, paymentLookup: lookup))
+        }
+
         if parser.isOnChainZK() {
             let additional = parser.destinations.compactMap { destination -> String? in
                 hashZKType(of: destination.value) == nil ? nil : destination.value
             }
-            let onChain = parser.destinations.first { $0.type == .bitcoinAddress }?.value
             return try await getPaymentsForZK(
                 lookupValue: parser.onChainEncryptionText ?? "",
                 encryptionKey: parser.onChainEncryptionSecret,
                 additionalHashValues: additional,
-                expectedOnChainAddress: onChain,
+                expectedOnChainAddress: expectedOnChain,
                 options: options
             )
         }
@@ -173,8 +179,9 @@ public final class BrantaService {
     ) async throws -> PaymentsResult {
         let payments = try await client.getPayments(destinationValue: lookupValue, options: options)
         var keys: [(String, String)] = []
+        var bound: [Payment] = []
         for payment in payments {
-            try decryptDestinations(
+            let onChainBound = try decryptDestinations(
                 payment: payment,
                 destinationValue: lookupValue,
                 encryptionKey: encryptionKey,
@@ -182,13 +189,35 @@ public final class BrantaService {
                 keys: &keys,
                 expectedOnChainAddress: expectedOnChainAddress
             )
+            var hashesBound = true
             for value in additionalHashValues {
-                decryptHashZKDestinations(payment: payment, plainValue: value, keys: &keys)
+                if !decryptHashZKDestinations(payment: payment, plainValue: value, keys: &keys) {
+                    hashesBound = false
+                }
+            }
+            if onChainBound && hashesBound {
+                bound.append(payment)
             }
         }
-        return PaymentsResult(payments: payments, verifyURL: try buildVerifyURL(options: options, paymentLookup: lookupValue, keys: keys))
+        return PaymentsResult(payments: bound, verifyURL: try buildVerifyURL(options: options, paymentLookup: lookupValue, keys: keys))
     }
 
+    /// The single on-chain address every `bitcoin:` / `bc=` / `tb=` instruction in the QR agrees on.
+    private func uniformOnChainAddress(_ parser: QRParser) throws -> String? {
+        let addresses = parser.destinations
+            .filter { $0.type == .bitcoinAddress && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map(\.value)
+        guard let first = addresses.first else { return nil }
+        for address in addresses.dropFirst() where !addressesMatch(first, address) {
+            throw BrantaPaymentError(message: Self.tamperedMessage, reason: .tampered)
+        }
+        return first
+    }
+
+    private static let tamperedMessage =
+        "The Bitcoin address in the QR code does not match the address verified by Branta. The QR code may have been tampered with."
+
+    @discardableResult
     private func decryptDestinations(
         payment: Payment,
         destinationValue: String,
@@ -196,7 +225,8 @@ public final class BrantaService {
         hashZKType: DestinationType?,
         keys: inout [(String, String)],
         expectedOnChainAddress: String?
-    ) throws {
+    ) throws -> Bool {
+        var onChainBound = expectedOnChainAddress == nil
         for destination in payment.destinations {
             destination.isEncrypted = destination.isZk
             guard destination.isZk else { continue }
@@ -210,11 +240,9 @@ public final class BrantaService {
                     continue
                 }
                 if let expectedOnChainAddress, !addressesMatch(decrypted, expectedOnChainAddress) {
-                    throw BrantaPaymentError(
-                        message: "The Bitcoin address in the QR code does not match the address verified by Branta. The QR code may have been tampered with.",
-                        reason: .tampered
-                    )
+                    throw BrantaPaymentError(message: Self.tamperedMessage, reason: .tampered)
                 }
+                if expectedOnChainAddress != nil { onChainBound = true }
                 destination.value = decrypted
                 destination.isEncrypted = false
                 putIfAbsent(zkID: destination.zkID, key: encryptionKey, into: &keys)
@@ -231,11 +259,14 @@ public final class BrantaService {
                 }
             }
         }
+        return onChainBound
     }
 
-    private func decryptHashZKDestinations(payment: Payment, plainValue: String, keys: inout [(String, String)]) {
-        guard let hashType = hashZKType(of: plainValue) else { return }
+    @discardableResult
+    private func decryptHashZKDestinations(payment: Payment, plainValue: String, keys: inout [(String, String)]) -> Bool {
+        guard let hashType = hashZKType(of: plainValue) else { return false }
         let key = normalizedHash(plainValue)
+        var bound = false
         for destination in payment.destinations {
             guard destination.isZk, destination.type == hashType else { continue }
             do {
@@ -243,10 +274,12 @@ public final class BrantaService {
                 destination.isEncrypted = false
                 putIfAbsent(zkID: destination.zkID, key: key, into: &keys)
                 tryDecryptMetadata(payment: payment, destination: destination, keyUsed: key)
+                bound = true
             } catch {
                 continue
             }
         }
+        return bound
     }
 
     private func tryDecryptMetadata(payment: Payment, destination: Destination, keyUsed: String) {

@@ -9,6 +9,8 @@ struct QRParser {
     var destinations: [QRDestination] = []
     var onChainEncryptionText: String?
     var onChainEncryptionSecret: String?
+    /// A payable instruction this SDK cannot bind to a decrypted destination.
+    var hasUnverifiableInstruction = false
 
     var destination: String? { destinations.first?.value }
     var destinationType: DestinationType? { destinations.first?.type }
@@ -21,28 +23,43 @@ struct QRParser {
 
         if scheme == "bitcoin" || scheme == "lightning" {
             if let address = Self.extractAddress(text) {
-                destinations.append(QRDestination(value: address, type: Self.destinationType(of: text)))
+                let type = Self.destinationType(of: text)
+                destinations.append(QRDestination(value: address, type: type))
+                if type != .bitcoinAddress && hashZKType(of: address) == nil {
+                    hasUnverifiableInstruction = true
+                }
             }
             let query = text.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).dropFirst().first.map(String.init) ?? ""
             let params = Self.parseQuery(query)
             onChainEncryptionText = params["branta_id"]
             onChainEncryptionSecret = params["branta_secret"]
-            if let lightning = params["lightning"] {
-                destinations.append(QRDestination(value: lightning, type: Self.detectPlainTextType(lightning)))
-            }
-            if let bolt12 = params["bolt12"] {
-                destinations.append(QRDestination(value: bolt12, type: Self.detectPlainTextType(bolt12)))
-            }
-            if let ark = params["ark"] {
-                destinations.append(QRDestination(value: ark, type: Self.detectPlainTextType(ark)))
-            }
-            if let silent = params["silent_payment"] {
-                destinations.append(QRDestination(value: silent, type: Self.detectPlainTextType(silent)))
+            addBindable(params["lightning"], type: params["lightning"].flatMap(Self.detectPlainTextType), onChain: false)
+            addBindable(params["bolt12"], type: params["bolt12"].flatMap(Self.detectPlainTextType), onChain: false)
+            addBindable(params["ark"], type: params["ark"].flatMap(Self.detectPlainTextType), onChain: false)
+            addBindable(params["silent_payment"], type: params["silent_payment"].flatMap(Self.detectPlainTextType), onChain: false)
+            addBindable(params["bc"], type: .bitcoinAddress, onChain: true)
+            addBindable(params["tb"], type: .bitcoinAddress, onChain: true)
+            addBindable(params["sp"], type: params["sp"].flatMap(Self.detectPlainTextType), onChain: false)
+            addBindable(
+                params["lno"],
+                type: params["lno"].map { Self.detectPlainTextType($0) ?? .bolt12 },
+                onChain: false
+            )
+            if let pay = params["pay"], !pay.isEmpty {
+                hasUnverifiableInstruction = true
             }
         } else if text.contains(":") {
             destinations.append(QRDestination(value: text, type: nil))
         } else {
             destinations.append(QRDestination(value: text, type: Self.detectPlainTextType(text)))
+        }
+    }
+
+    private mutating func addBindable(_ value: String?, type: DestinationType?, onChain: Bool) {
+        guard let value else { return }
+        destinations.append(QRDestination(value: value, type: type))
+        if !value.isEmpty && !onChain && hashZKType(of: value) == nil {
+            hasUnverifiableInstruction = true
         }
     }
 

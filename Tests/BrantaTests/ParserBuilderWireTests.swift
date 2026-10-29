@@ -45,6 +45,47 @@ final class QRParserTests: XCTestCase {
         XCTAssertEqual(silent.destinations[1].type, .silentPayment)
     }
 
+    func testBip321BcAndTbAreOnChainAddresses() {
+        let parser = QRParser("bitcoin:?bc=bc1qmerchant&tb=tb1qtest")
+        XCTAssertEqual(parser.destinations.map(\.value), ["bc1qmerchant", "tb1qtest"])
+        XCTAssertEqual(parser.destinations[0].type, .bitcoinAddress)
+        XCTAssertEqual(parser.destinations[1].type, .bitcoinAddress)
+        XCTAssertFalse(parser.hasUnverifiableInstruction)
+    }
+
+    func testSpParamAddsSilentPayment() {
+        let parser = QRParser("bitcoin:bc1qmerchant?sp=sp1qqexample")
+        XCTAssertEqual(parser.destinations[1].value, "sp1qqexample")
+        XCTAssertEqual(parser.destinations[1].type, .silentPayment)
+        XCTAssertFalse(parser.hasUnverifiableInstruction)
+    }
+
+    func testLnoAndPayAreUnverifiable() {
+        let lno = QRParser("bitcoin:bc1qmerchant?lno=lno1qqexample")
+        XCTAssertEqual(lno.destinations[1].value, "lno1qqexample")
+        XCTAssertEqual(lno.destinations[1].type, .bolt12)
+        XCTAssertTrue(lno.hasUnverifiableInstruction)
+
+        let pay = QRParser("bitcoin:bc1qmerchant?pay=bitcoin:bc1qother")
+        XCTAssertTrue(pay.hasUnverifiableInstruction)
+        XCTAssertEqual(pay.destinations.map(\.value), ["bc1qmerchant"])
+    }
+
+    func testBindableHashZKLegsAreVerifiable() {
+        let parser = QRParser("bitcoin:bc1qmerchant?lightning=lnbc100n1ptest&ark=ark1x&silent_payment=sp1x")
+        XCTAssertEqual(parser.destinations.count, 4)
+        XCTAssertFalse(parser.hasUnverifiableInstruction)
+    }
+
+    func testBolt12ParamAndNonHashZKPathAreUnverifiable() {
+        XCTAssertTrue(QRParser("bitcoin:bc1qmerchant?bolt12=lno1qqexample").hasUnverifiableInstruction)
+        XCTAssertTrue(QRParser("lightning:lno1qqexample").hasUnverifiableInstruction)
+        XCTAssertTrue(QRParser("lightning:lnurl1qqexample").hasUnverifiableInstruction)
+        XCTAssertFalse(QRParser("lightning:lnbc100n1ptest").hasUnverifiableInstruction)
+        XCTAssertFalse(QRParser("bitcoin:bc1qmerchant").hasUnverifiableInstruction)
+        XCTAssertFalse(QRParser("bitcoin:bc1qmerchant?lightning=").hasUnverifiableInstruction)
+    }
+
     func testLightningURI() {
         XCTAssertEqual(QRParser("lightning:lnbc100n1ptest").destinationType, .bolt11)
         XCTAssertEqual(QRParser("LIGHTNING:lnbc100n1ptest").destinationType, .bolt11)
