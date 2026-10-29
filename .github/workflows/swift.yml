@@ -11,5 +11,3 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test
         run: swift test
-        env:
-          BRANTA_SKIP_INTEGRATION: "1"

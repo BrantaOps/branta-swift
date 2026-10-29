@@ -239,9 +239,8 @@ func isAPIKeyValid(options: BrantaClientOptions?) async throws -> Bool
 
 ```bash
 swift test
+BRANTA_RUN_INTEGRATION=1 swift test --filter IntegrationTests   # live Guardrail lookups (opt-in)
 ```
-
-Live calls to staging and production run with the suite. Set `BRANTA_SKIP_INTEGRATION=1` to skip them.
 
 # Responsible Disclosure
 

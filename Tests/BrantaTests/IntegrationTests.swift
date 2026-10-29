@@ -24,8 +24,8 @@ final class IntegrationTests: XCTestCase {
     private let stagingZKLightning = "lightning:lnbc25840n1p4qml83pp5aztzddx4k87m0wkd6wmgxr9753400mcj7sa89sa392krmueqv9qqdz92d6xzemfdenjqsnjv9h8gcfq95s9xarpva5kueeqtf9jqsn0d36zqvf3ypzhsctdwpkx2cqzzsxqzursp5c6dt82gqpn5vucmqtctur0p3cuur6xqgc6348wtz7adtgug9uf2q9qxpqysgq5yt6x946w3664th4h02pug9yhgszpznqyfwzndjk2sxe0878slqkdhgce4mr5ky2ux4gy4yt0vsy536tencls8fvu5wdzyaq548yf4qqu0lyg7"
 
     override func setUpWithError() throws {
-        if ProcessInfo.processInfo.environment["BRANTA_SKIP_INTEGRATION"] != nil {
-            throw XCTSkip("BRANTA_SKIP_INTEGRATION is set")
+        if ProcessInfo.processInfo.environment["BRANTA_RUN_INTEGRATION"] != "1" {
+            throw XCTSkip("Live lookups skipped unless BRANTA_RUN_INTEGRATION=1")
         }
     }
 
