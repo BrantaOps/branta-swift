@@ -126,7 +126,10 @@ func urlFragment(for keys: [(String, String)]) -> String {
 }
 
 func addressesMatch(_ a: String, _ b: String) -> Bool {
-    func isBech32(_ value: String) -> Bool { value.lowercased().hasPrefix("bc1") }
+    func isBech32(_ value: String) -> Bool {
+        let lower = value.lowercased()
+        return lower.hasPrefix("bc1") || lower.hasPrefix("tb1") || lower.hasPrefix("bcrt1")
+    }
     if isBech32(a) && isBech32(b) {
         return a.lowercased() == b.lowercased()
     }

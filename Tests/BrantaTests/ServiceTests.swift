@@ -218,10 +218,141 @@ final class ServiceTests: XCTestCase {
     }
 
     func testLightningQRWithZKParamsSkipsAddressComparison() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let payment = PaymentBuilder()
+            .addDestination(encryptedBitcoin, type: .bitcoinAddress).setZK()
+            .addDestination(encryptedBolt11, type: .bolt11).setZK()
+            .build()
+        client.getImpl = { _, _ in [payment] }
         let qr = "lightning:\(bolt11)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
         let result = try await loose.getPaymentsByQRCode(qr)
         XCTAssertEqual(result.payments[0].destinations[0].value, bitcoin)
+        XCTAssertEqual(result.payments[0].destinations[1].value, decryptedBolt11)
+    }
+
+    // MARK: QR payable binding
+    // A hit means every payable instruction in the QR decrypted to a destination on the record.
+
+    func testSwappedAddressAndWrongSecretReturnsNoPayments() async throws {
+        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let qr = "bitcoin:\(swapped)?branta_id=\(encryptedBitcoin)&branta_secret=wrong-secret"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertTrue(result.payments.isEmpty)
+    }
+
+    func testWrongSecretWithBitcoinPathReturnsNoPayments() async throws {
+        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let qr = "bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=wrong-secret"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertTrue(result.payments.isEmpty)
+    }
+
+    func testAttackerLightningLegReturnsNoPayments() async throws {
+        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let qr = "bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)&lightning=lnbc1attacker"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertTrue(result.payments.isEmpty)
+    }
+
+    func testAttackerArkLegReturnsNoPayments() async throws {
+        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let qr = "bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)&ark=ark1attacker"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertTrue(result.payments.isEmpty)
+    }
+
+    func testAttackerSilentPaymentLegReturnsNoPayments() async throws {
+        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let qr = "bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)&sp=sp1attacker"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertTrue(result.payments.isEmpty)
+    }
+
+    func testBip321BcSwapRejects() async {
+        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let qr = "bitcoin:?bc=\(swapped)&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
+        do {
+            _ = try await loose.getPaymentsByQRCode(qr)
+            XCTFail("expected tamper")
+        } catch let error as BrantaPaymentError {
+            XCTAssertEqual(error.reason, .tampered)
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+    }
+
+    func testBip321TbSwapRejects() async {
+        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let qr = "bitcoin:\(bitcoin)?tb=tb1qattacker&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
+        do {
+            _ = try await loose.getPaymentsByQRCode(qr)
+            XCTFail("expected tamper")
+        } catch let error as BrantaPaymentError {
+            XCTAssertEqual(error.reason, .tampered)
+            XCTAssertTrue(client.gets.isEmpty)
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+    }
+
+    func testBip321BcMatchResolves() async throws {
+        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let qr = "bitcoin:?bc=\(bitcoin)&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertEqual(result.payments.count, 1)
+        XCTAssertEqual(result.payments[0].destinations[0].value, bitcoin)
+        XCTAssertFalse(result.payments[0].destinations[0].isEncrypted)
+    }
+
+    func testPathAndBcDisagreeRejectsBeforeLookup() async {
+        let qr = "bitcoin:\(bitcoin)?bc=\(swapped)&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
+        do {
+            _ = try await loose.getPaymentsByQRCode(qr)
+            XCTFail("expected tamper")
+        } catch let error as BrantaPaymentError {
+            XCTAssertEqual(error.reason, .tampered)
+            XCTAssertTrue(client.gets.isEmpty)
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+    }
+
+    func testPayInstructionReturnsNoPaymentsWithoutLookup() async throws {
+        let qr = "bitcoin:\(bitcoin)?pay=bitcoin:\(swapped)&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertTrue(result.payments.isEmpty)
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    func testLnoInstructionReturnsNoPaymentsWithoutLookup() async throws {
+        let qr = "bitcoin:\(bitcoin)?lno=lno1qqattacker&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertTrue(result.payments.isEmpty)
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    func testBolt12ParamReturnsNoPaymentsWithoutLookup() async throws {
+        let qr = "bitcoin:\(bitcoin)?bolt12=lno1qqattacker&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertTrue(result.payments.isEmpty)
+        XCTAssertTrue(client.gets.isEmpty)
+        XCTAssertTrue(result.verifyURL.contains("/v2/verify/"))
+    }
+
+    func testBolt12AndLNURLUrisReturnNoPaymentsWithoutLookup() async throws {
+        let bolt12 = try await loose.getPaymentsByQRCode("lightning:lno1qqexample")
+        XCTAssertTrue(bolt12.payments.isEmpty)
+        let lnurl = try await loose.getPaymentsByQRCode("lightning:lnurl1qqexample")
+        XCTAssertTrue(lnurl.payments.isEmpty)
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    func testNoPayableInstructionWrongSecretReturnsEncryptedRecord() async throws {
+        client.getImpl = { _, _ in [self.zkBitcoin()] }
+        let qr = "bitcoin:?branta_id=\(encryptedBitcoin)&branta_secret=wrong-secret"
+        let result = try await loose.getPaymentsByQRCode(qr)
+        XCTAssertEqual(result.payments.count, 1)
+        XCTAssertEqual(result.payments[0].destinations[0].value, encryptedBitcoin)
+        XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
     }
 
     func testGetPaymentsPlainAndEmptyVerifyURL() async throws {
