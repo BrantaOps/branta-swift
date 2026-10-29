@@ -13,14 +13,14 @@ Swift Package Manager, in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/BrantaOps/branta-swift.git", from: "3.2.3"),
+    .package(url: "https://github.com/BrantaOps/branta-swift.git", from: "3.2.4"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: ["Branta"]),
 ]
 ```
 
-Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 3.2.3.
+Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 3.2.4.
 
 # Integration Guide
 
@@ -232,8 +232,8 @@ func isAPIKeyValid(options: BrantaClientOptions?) async throws -> Bool
 # Publishing
 
 1. Add a changelog entry and bump the version in the Installation section.
-2. Tag the release `v3.2.3` (the `v` prefix). Swift Package Manager resolves `from: "3.2.3"` from that tag.
-3. Push the tag: `git push origin v3.2.3`
+2. Tag the release `v3.2.4` (the `v` prefix). Swift Package Manager resolves `from: "3.2.4"` from that tag.
+3. Push the tag: `git push origin v3.2.4`
 
 # Tests
 
