@@ -1,247 +1,98 @@
 # Branta Swift SDK
 
-Swift SDK for the Branta V2 API — payment destination lookup and registration with zero-knowledge encryption support. For native iOS and macOS apps.
+Swift SDK for the [Branta](https://developer.branta.pro) V2 API. For native iOS and macOS apps.
 
-# Requirements
+Use `verify` on send and `addPayment` on receive. Status handling and parent platforms are in the [developer docs](https://developer.branta.pro).
+
+## Requirements
 
 - iOS 15 or macOS 12
 - Swift 5.9
 
-# Installation
+## Install
 
 Swift Package Manager, in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/BrantaOps/branta-swift.git", from: "3.2.4"),
+    .package(url: "https://github.com/BrantaOps/branta-swift.git", from: "4.0.0"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: ["Branta"]),
 ]
 ```
 
-Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 3.2.4.
+Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 4.0.0.
 
-# Integration Guide
-
-If you are an AI agent implementing this SDK, follow the steps below exactly. If you are a developer, use this as a reference for the recommended integration patterns.
-
-**1. Ask which side(s) of a payment they are implementing:**
-- **Send side** — the flow for outbound payments (e.g. a wallet scanning a QR code).
-- **Receive side** — the flow for receiving payment (e.g. a checkout or POS). You post destinations (ZK-encrypted) to Branta so wallets can verify them.
-- **Both** — some apps do both. Implement each side independently.
-
-If they are on the receive side, ask one follow-up:
-- **Platform** — single-tenant, one API key.
-- **Parent Platform** — multi-tenant, manages multiple child platforms. Two variants:
-  - **Shared key (Recommended)** — one API key for all children, no HMAC secret needed; tag the child per-payment with `setChildPlatform(name:logoURL:logoLightURL:)`. Default to this unless there's a specific reason for separate per-child keys.
-  - **Per-client keys** — each child has its own API key, and the parent signs every request with an HMAC secret to prove it originated from the parent; scope requests per-call. Use only if each child needs an independent, separately-revocable API key.
-
-**2. Follow the matching Quick Start section below.**
-
-**3. Apply these rules:**
-
-General (all types):
-- Always use `PrivacyMode.strict`. Never switch to `loose` unless there is no QR scanner and ZK is impossible.
-- Never call `BrantaClient` directly — always go through `BrantaService`.
-- For `baseURL`: use `.production` only in production environments. Use `.staging` everywhere else — including local development, CI, and staging/test environments.
-
-Send side (wallets):
-- Prefer `getPaymentsByQRCode` over `getPayments` — it handles multi-value ZK QR payloads correctly.
-- Only fall back to `getPayments` for copy/paste flows where there is no QR code.
-- If `payments` is empty or an error is thrown, render nothing. Never show an error or "not verified" message.
-- When `result.payments` is non-empty, display: the platform logo, the platform name (`payment.platform`), and the payment description (`payment.description`). Only render description when non-empty. Make the verification card a clickable link to `result.verifyURL` — do not display the raw URL.
-- For the platform logo, use `payment.platformLogoURL` on dark backgrounds and `payment.platformLogoLightURL` on light backgrounds.
-- Optionally display `payment.parentPlatform?.logoURL` / `payment.parentPlatform?.logoLightURL` as a small secondary badge (e.g. corner icon). This is not required.
-
-Receive side (platforms):
-- Always call `setZK()` on the `PaymentBuilder` before calling `addPayment`. Plain-text destinations are rejected in `strict` mode.
-- Store the `secret` returned by `addPayment` alongside the invoice — it is required to reconstruct the verify URL.
-
-Receive side (parent platforms — per-client keys), in addition to the platform rules:
-- Include `hmacSecret` in `BrantaClientOptions` but omit `defaultAPIKey` at service construction.
-- Pass per-call `BrantaClientOptions` with each child's API key to scope requests.
-
-Receive side (parent platforms — shared key), in addition to the platform rules:
-- Include `defaultAPIKey` in `BrantaClientOptions`. Do not include `hmacSecret`.
-- Call `setChildPlatform(name:logoURL:logoLightURL:)` on the builder to tag each payment with the child's branding.
-
-# Quick Start
-
-## For Wallets
-
-Wallets use `PrivacyMode.strict`. Two flows:
-
-- **QR scan**: call `getPaymentsByQRCode` with the raw QR text.
-- **Copy/paste**: call `getPayments` with the pasted text. Plain-text on-chain addresses won't return results in strict mode; self-encrypted types (bolt11, ark, silent payment) work.
+## Send
 
 ```swift
 import Branta
 
-let service = BrantaService(options: BrantaClientOptions(
-    baseURL: .production,
-    privacy: .strict
+let service = BrantaService(options: BrantaApiOptions(
+    environment: .production // Staging everywhere else
 ))
 
-do {
-    let result = isQRCode
-        ? try await service.getPaymentsByQRCode(input)
-        : try await service.getPayments(input)
+let result = try await service.verify(input) // scanned QR or pasted text
 
-    if result.payments.isEmpty {
-        // Not found — show nothing. Address not known to Branta, not necessarily malicious.
-        return
-    }
-
-    // Render result.payments and result.verifyURL
-} catch {
-    // Swallow errors — never surface a lookup failure to the user.
+switch result.status {
+case .match:
+    // Show the card for result.payments[0]. Link it to result.verifyURL.
+case .unknown:
+    // Not in Branta. Show nothing.
+case .tampered:
+    // Destination was altered. Warn. Do not show a verified card.
+case .incomplete:
+    // 5xx, 429, or unreachable. Tell the user. Do not treat this as unknown.
 }
 ```
 
-### No-QR-Code Flows
+A logo on the wrong origin throws. Do not treat that as `unknown`.
 
-When QR scanning is not available:
+On-chain Bitcoin needs a `bitcoin:` URI with `branta_id` and `branta_secret`. bolt11, Ark, and silent payments resolve from the value. A bare address, including testnet `tb1` and `bcrt1`, is `unknown`.
 
-**Option 1 — Keep strict mode (no code changes)**
+A 404 is `unknown`. A 5xx, a 429, or no network is `incomplete`.
 
-Only self-encrypted types (bolt11, ark, silent payment) return results. Plain-text on-chain addresses silently return empty from `getPaymentsByQRCode`, and `getPayments` throws.
-
-**Option 2 — Opt-in loose mode (Recommended)**
-
-Add a user-facing setting. Only switch when the user explicitly opts in:
+## Receive
 
 ```swift
-let options = userOptedInToOnChainVerification
-    ? BrantaClientOptions(privacy: .loose)
-    : nil
-
-let result = try await service.getPayments(input, options: options)
-```
-
-**Option 3 — Always loose mode**
-
-```swift
-let service = BrantaService(options: BrantaClientOptions(
-    baseURL: .production,
-    privacy: .loose
+let service = BrantaService(options: BrantaApiOptions(
+    environment: .production,
+    apiKey: "<api-key>"
 ))
-```
 
-## For Platforms
-
-```swift
-let service = BrantaService(options: BrantaClientOptions(
-    baseURL: .production,
-    defaultAPIKey: "<api-key>",
-    privacy: .strict
-))
-```
-
-```swift
 let payment = PaymentBuilder()
-    .setDescription("Invoice #1234")
-    .addDestination("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", type: .bitcoinAddress)
-    .setZK()
+    .setDescription("Invoice #12345")
+    .addDestination("bc1q…", type: .bitcoinAddress)
     .setTTL(600)
     .build()
 
-let result = try await service.addPayment(payment)
-// result.secret — store alongside the invoice; needed to reconstruct verifyURL
-// result.verifyURL — display to the payer
+let added = try await service.addPayment(payment)
 ```
 
-## For Parent Platforms
+`addPayment` encrypts a copy. The `Payment` you pass in stays plaintext, so a failed post can be retried with the same value.
 
-Choose a variant based on key structure. Only the per-client keys variant signs requests with HMAC — shared key needs none.
+Store `added.secret` with the invoice. Put `branta_id` and `branta_secret` on the invoice QR. `added.verifyURL` is the link for the wallet.
 
-<details>
-<summary>Shared key — one API key covers all children (Recommended)</summary>
+A parent platform with one shared key sets `apiKey` on the service and calls `setChildPlatform(name:logoURL:logoLightURL:)` for each payment. That is the path for new parent platforms. The deprecated per-client HMAC path is in the developer docs.
 
-```swift
-let service = BrantaService(options: BrantaClientOptions(
-    baseURL: .production,
-    defaultAPIKey: "<shared-api-key>",
-    privacy: .strict
-))
-```
+## Destination types
 
-```swift
-let payment = PaymentBuilder()
-    .addDestination("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", type: .bitcoinAddress)
-    .setZK()
-    .setChildPlatform(name: "ChildBrand", logoURL: "https://example.com/logo.png")
-    .build()
+`addPayment` accepts `bitcoinAddress`, `bolt11`, `arkAddress`, and `silentPayment`. Bitcoin addresses use the secret `addPayment` returns. bolt11, Ark, and silent payments use a key derived from the lowercased value, so the same input always produces the same lookup token.
 
-let result = try await service.addPayment(payment)
-```
-
-</details>
-
-<details>
-<summary>Per-client keys — each child has its own API key</summary>
-
-```swift
-let service = BrantaService(options: BrantaClientOptions(
-    baseURL: .production,
-    hmacSecret: "<hmac-secret>",
-    privacy: .strict
-))
-```
-
-```swift
-let payment = PaymentBuilder()
-    .addDestination("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", type: .bitcoinAddress)
-    .setZK()
-    .build()
-
-let result = try await service.addPayment(
-    payment,
-    options: BrantaClientOptions(defaultAPIKey: "<child-api-key>")
-)
-```
-
-</details>
-
-# Privacy
-
-`PrivacyMode` controls whether plain-text on-chain lookups are allowed.
-
-| Value | Behavior |
-|-------|----------|
-| `strict` | Only ZK (zero-knowledge / encrypted) lookups are permitted. `getPayments` throws `BrantaPaymentError` for plain addresses; `getPaymentsByQRCode` returns an empty list. `addPayment` requires all destinations to have `isZk = true`. |
-| `loose` | Both plain and ZK lookups are allowed. No restrictions enforced. |
-
-# BrantaService
-
-The primary API.
-
-**Prefer `getPaymentsByQRCode` for integrations.** It parses the raw QR text and correctly resolves multiple ZK values in a single scan.
-
-```swift
-func getPaymentsByQRCode(_ qrText: String, options: BrantaClientOptions?) async throws -> PaymentsResult
-func getPayments(_ destinationValue: String, destinationEncryptionKey: String?, options: BrantaClientOptions?) async throws -> PaymentsResult
-func addPayment(_ payment: Payment, options: BrantaClientOptions?) async throws -> AddPaymentResult
-func isAPIKeyValid(options: BrantaClientOptions?) async throws -> Bool
-```
-
-`PaymentsResult` contains the list of matching `payments` and the `verifyURL` to display — `verifyURL` is always returned, even when `payments` is empty.
-
-`AddPaymentResult` contains the `payment` response, the `secret` encryption key, and the `verifyURL`.
-
-# Publishing
-
-1. Add a changelog entry and bump the version in the Installation section.
-2. Tag the release `v3.2.4` (the `v` prefix). Swift Package Manager resolves `from: "3.2.4"` from that tag.
-3. Push the tag: `git push origin v3.2.4`
-
-# Tests
+## Development
 
 ```bash
 swift test
-BRANTA_RUN_INTEGRATION=1 swift test --filter IntegrationTests   # live Guardrail lookups (opt-in)
+BRANTA_RUN_INTEGRATION=1 swift test --filter IntegrationTests
 ```
 
-# Responsible Disclosure
+## Publishing
+
+1. Add a changelog entry and bump the version in the Installation section.
+2. Tag the release `v4.0.0` (the `v` prefix). Swift Package Manager resolves `from: "4.0.0"` from that tag.
+3. Push the tag: `git push origin v4.0.0`
+
+## Responsible Disclosure
 
 Found critical bugs/vulnerabilities? Please email them to support@branta.pro. Thanks!
