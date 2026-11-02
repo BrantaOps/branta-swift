@@ -45,7 +45,7 @@ final class ClientTests: XCTestCase {
             _ = try await client(json: json).0.getPayments(destinationValue: "value", options: nil)
             XCTFail("expected throw")
         } catch let error as BrantaPaymentError {
-            XCTAssertTrue(error.message.contains("platformLogoUrl"))
+            XCTAssertTrue(error.message.contains("platformLogoURL"))
         } catch {
             XCTFail("unexpected \(error)")
         }
@@ -53,11 +53,11 @@ final class ClientTests: XCTestCase {
 
     func testMismatchedLightAndNestedLogos() async throws {
         let cases: [(String, String)] = [
-            (#"[{"destinations": \#(destinations), "platform_logo_light_url": "\#(otherOrigin)/logo-light.png"}]"#, "platformLogoLightUrl"),
-            (#"[{"destinations": \#(destinations), "parent_platform": {"logo_url": "\#(otherOrigin)/logo.png"}}]"#, "parentPlatform.logoUrl"),
-            (#"[{"destinations": \#(destinations), "parent_platform": {"logo_light_url": "\#(otherOrigin)/logo-light.png"}}]"#, "parentPlatform.logoLightUrl"),
-            (#"[{"destinations": \#(destinations), "child_platform": {"logo_url": "\#(otherOrigin)/logo.png"}}]"#, "childPlatform.logoUrl"),
-            (#"[{"destinations": \#(destinations), "child_platform": {"logo_light_url": "\#(otherOrigin)/logo-light.png"}}]"#, "childPlatform.logoLightUrl"),
+            (#"[{"destinations": \#(destinations), "platform_logo_light_url": "\#(otherOrigin)/logo-light.png"}]"#, "platformLogoLightURL"),
+            (#"[{"destinations": \#(destinations), "parent_platform": {"logo_url": "\#(otherOrigin)/logo.png"}}]"#, "parentPlatform.logoURL"),
+            (#"[{"destinations": \#(destinations), "parent_platform": {"logo_light_url": "\#(otherOrigin)/logo-light.png"}}]"#, "parentPlatform.logoLightURL"),
+            (#"[{"destinations": \#(destinations), "child_platform": {"logo_url": "\#(otherOrigin)/logo.png"}}]"#, "childPlatform.logoURL"),
+            (#"[{"destinations": \#(destinations), "child_platform": {"logo_light_url": "\#(otherOrigin)/logo-light.png"}}]"#, "childPlatform.logoLightURL"),
         ]
         for (json, field) in cases {
             do {

@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A tab, line feed, or carriage return in a QR is stripped before the destination is typed, and a repeated query key keeps the first value.
 
 ### Changed
+- `Payment` and `Destination` are structs. `addPayment` receives a copy, so a failed post leaves the caller value plaintext.
 - `setDescription` writes `metadata.description`. The SDK does not POST or GET Guardrail plaintext `description`. After metadata decrypt, `Payment.description` is lifted from `metadata.description`.
 - This release matches `@branta-ops/branta` 4.0.5.
 

@@ -119,16 +119,16 @@ final class BrantaClient: BrantaClienting {
         func check(_ logoURL: String?, _ fieldName: String) throws {
             guard let logoURL, !logoURL.isEmpty else { return }
             guard let logoOrigin = origin(of: logoURL), logoOrigin == baseOrigin else {
-                throw BrantaPaymentError(message: "\(fieldName) domain does not match the configured baseUrl domain")
+                throw BrantaPaymentError(message: "\(fieldName) domain does not match the configured environment")
             }
         }
         for payment in payments {
-            try check(payment.platformLogoURL, "platformLogoUrl")
-            try check(payment.platformLogoLightURL, "platformLogoLightUrl")
-            try check(payment.parentPlatform?.logoURL, "parentPlatform.logoUrl")
-            try check(payment.parentPlatform?.logoLightURL, "parentPlatform.logoLightUrl")
-            try check(payment.childPlatform?.logoURL, "childPlatform.logoUrl")
-            try check(payment.childPlatform?.logoLightURL, "childPlatform.logoLightUrl")
+            try check(payment.platformLogoURL, "platformLogoURL")
+            try check(payment.platformLogoLightURL, "platformLogoLightURL")
+            try check(payment.parentPlatform?.logoURL, "parentPlatform.logoURL")
+            try check(payment.parentPlatform?.logoLightURL, "parentPlatform.logoLightURL")
+            try check(payment.childPlatform?.logoURL, "childPlatform.logoURL")
+            try check(payment.childPlatform?.logoLightURL, "childPlatform.logoLightURL")
         }
     }
 }

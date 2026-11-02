@@ -12,7 +12,7 @@ public struct Platform: Equatable, Sendable {
     }
 }
 
-public final class Destination {
+public struct Destination: Sendable {
     public var value: String
     public var isPrimary: Bool
     /// Client-side only. True when a GET row has `zk` true and still needs decrypt.
@@ -39,7 +39,7 @@ public final class Destination {
     }
 }
 
-public final class Payment {
+public struct Payment: Sendable {
     /// Not a plaintext API field. `addPayment` folds this into encrypted metadata, and `verify` lifts it back after decrypt.
     public var description: String?
     public var destinations: [Destination]

@@ -189,12 +189,12 @@ final class ServiceTests: XCTestCase {
     }
 
     func testLogoMismatchStillErrors() async {
-        client.getImpl = { _, _ in throw BrantaPaymentError(message: "platformLogoUrl domain does not match the configured baseUrl domain") }
+        client.getImpl = { _, _ in throw BrantaPaymentError(message: "platformLogoURL domain does not match the configured environment") }
         do {
             _ = try await service.verify(invoice)
             XCTFail("expected throw")
         } catch let error as BrantaPaymentError {
-            XCTAssertTrue(error.message.contains("platformLogoUrl"))
+            XCTAssertTrue(error.message.contains("platformLogoURL"))
         } catch {
             XCTFail("unexpected \(error)")
         }
@@ -208,7 +208,7 @@ final class ServiceTests: XCTestCase {
     }
 
     func testAddPaymentLeavesCallerPlaintext() async throws {
-        let payment = PaymentBuilder()
+        var payment = PaymentBuilder()
             .addDestination(addr, type: .bitcoinAddress)
             .setDescription("Invoice")
             .build()
@@ -308,7 +308,7 @@ final class ServiceTests: XCTestCase {
 
     func testMetadataDecryptLiftsDescription() async throws {
         let meta = #"{"description":"Invoice"}"#
-        let destination = encrypted("cipher", id: "zk-1", type: .bitcoinAddress)
+        var destination = encrypted("cipher", id: "zk-1", type: .bitcoinAddress)
         destination.encryptedDek = "enc-dek"
         client.getImpl = { _, _ in [Payment(destinations: [destination], metadata: "enc-meta")] }
         aes.decryptImpl = { value, _ in
