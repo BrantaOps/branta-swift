@@ -8,8 +8,10 @@ final class QRParserTests: XCTestCase {
         XCTAssertEqual(parser.destinationType, .bitcoinAddress)
     }
 
-    func testBech32() {
+    func testBech32AndTestnet() {
         XCTAssertEqual(QRParser("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").destinationType, .bitcoinAddress)
+        XCTAssertEqual(QRParser("tb1qshra2mlujc9wfscvn4d8aqpyqgxzl55853xg7s").destinationType, .bitcoinAddress)
+        XCTAssertEqual(QRParser("bcrt1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq").destinationType, .bitcoinAddress)
     }
 
     func testBitcoinURI() {
@@ -31,6 +33,12 @@ final class QRParserTests: XCTestCase {
         XCTAssertEqual(parser.onChainEncryptionSecret, "secret")
     }
 
+    func testDuplicateQueryKeyKeepsTheFirstValue() {
+        let parser = QRParser("bitcoin:1attackeraddr?branta_id=ID1&branta_secret=SEC1&branta_secret=ATTACKER")
+        XCTAssertEqual(parser.onChainEncryptionText, "ID1")
+        XCTAssertEqual(parser.onChainEncryptionSecret, "SEC1")
+    }
+
     func testLightningParam() {
         let parser = QRParser("bitcoin:addr?lightning=lnbc100n1ptest")
         XCTAssertEqual(parser.destinations.count, 2)
@@ -47,9 +55,9 @@ final class QRParserTests: XCTestCase {
 
     func testBip321BcAndTbAreOnChainAddresses() {
         let parser = QRParser("bitcoin:?bc=bc1qmerchant&tb=tb1qtest")
-        XCTAssertEqual(parser.destinations.map(\.value), ["bc1qmerchant", "tb1qtest"])
-        XCTAssertEqual(parser.destinations[0].type, .bitcoinAddress)
+        XCTAssertEqual(parser.destinations.map(\.value), ["", "bc1qmerchant", "tb1qtest"])
         XCTAssertEqual(parser.destinations[1].type, .bitcoinAddress)
+        XCTAssertEqual(parser.destinations[2].type, .bitcoinAddress)
         XCTAssertFalse(parser.hasUnverifiableInstruction)
     }
 
@@ -63,7 +71,7 @@ final class QRParserTests: XCTestCase {
     func testLnoAndPayAreUnverifiable() {
         let lno = QRParser("bitcoin:bc1qmerchant?lno=lno1qqexample")
         XCTAssertEqual(lno.destinations[1].value, "lno1qqexample")
-        XCTAssertEqual(lno.destinations[1].type, .bolt12)
+        XCTAssertNil(lno.destinations[1].type)
         XCTAssertTrue(lno.hasUnverifiableInstruction)
 
         let pay = QRParser("bitcoin:bc1qmerchant?pay=bitcoin:bc1qother")
@@ -71,36 +79,45 @@ final class QRParserTests: XCTestCase {
         XCTAssertEqual(pay.destinations.map(\.value), ["bc1qmerchant"])
     }
 
-    func testBindableHashZKLegsAreVerifiable() {
-        let parser = QRParser("bitcoin:bc1qmerchant?lightning=lnbc100n1ptest&ark=ark1x&silent_payment=sp1x")
-        XCTAssertEqual(parser.destinations.count, 4)
-        XCTAssertFalse(parser.hasUnverifiableInstruction)
-    }
-
-    func testBolt12ParamAndNonHashZKPathAreUnverifiable() {
+    func testEmptyBolt12DoesNotFlagAndNonemptyDoes() {
+        XCTAssertFalse(QRParser("bitcoin:bc1qmerchant?bolt12=").hasUnverifiableInstruction)
         XCTAssertTrue(QRParser("bitcoin:bc1qmerchant?bolt12=lno1qqexample").hasUnverifiableInstruction)
-        XCTAssertTrue(QRParser("lightning:lno1qqexample").hasUnverifiableInstruction)
-        XCTAssertTrue(QRParser("lightning:lnurl1qqexample").hasUnverifiableInstruction)
-        XCTAssertFalse(QRParser("lightning:lnbc100n1ptest").hasUnverifiableInstruction)
-        XCTAssertFalse(QRParser("bitcoin:bc1qmerchant").hasUnverifiableInstruction)
         XCTAssertFalse(QRParser("bitcoin:bc1qmerchant?lightning=").hasUnverifiableInstruction)
     }
 
-    func testLightningURI() {
+    func testBolt12AndLNURLUrisAreUntyped() {
+        XCTAssertNil(QRParser("lightning:lno1qqexample").destinationType)
+        XCTAssertNil(QRParser("lightning:lnurl1qqexample").destinationType)
+        XCTAssertTrue(QRParser("lightning:lno1qqexample").hasUnverifiableInstruction)
+        XCTAssertTrue(QRParser("lightning:lnurl1qqexample").hasUnverifiableInstruction)
         XCTAssertEqual(QRParser("lightning:lnbc100n1ptest").destinationType, .bolt11)
         XCTAssertEqual(QRParser("LIGHTNING:lnbc100n1ptest").destinationType, .bolt11)
+        XCTAssertFalse(QRParser("lno1plainTextNotUri").hasUnverifiableInstruction)
+        XCTAssertNil(QRParser("LNURL1TESTVALUE").destinationType)
+        XCTAssertNil(QRParser("0x" + String(repeating: "a", count: 40)).destinationType)
+        XCTAssertNil(QRParser("user@example.com").destinationType)
     }
 
-    func testPlainTypes() {
+    func testPlainDerivedKeyTypes() {
         XCTAssertEqual(QRParser("lnbc100n1ptest").destinationType, .bolt11)
-        XCTAssertEqual(QRParser("LNURL1TESTVALUE").destinationType, .lnURL)
         XCTAssertEqual(QRParser("ark1testaddress").destinationType, .arkAddress)
         XCTAssertEqual(QRParser("tark1testaddress").destinationType, .arkAddress)
         XCTAssertEqual(QRParser("sp1testaddress").destinationType, .silentPayment)
         XCTAssertEqual(QRParser("tsp1testaddress").destinationType, .silentPayment)
-        XCTAssertEqual(QRParser("0x" + String(repeating: "a", count: 40)).destinationType, .tetherAddress)
-        XCTAssertEqual(QRParser("T" + String(repeating: "a", count: 33)).destinationType, .tetherAddress)
-        XCTAssertEqual(QRParser("user@example.com").destinationType, .lnAddress)
+    }
+
+    func testControlCharactersAreStrippedBeforeTyping() {
+        for prefix in ["bitcoi\tn:", "bitcoi\nn:", "bitcoi\rn:", "\u{01}bitcoin:"] {
+            let parser = QRParser(prefix + "1attackeraddr?branta_id=ID1&branta_secret=SEC1")
+            XCTAssertEqual(parser.destination, "1attackeraddr")
+            XCTAssertEqual(parser.destinationType, .bitcoinAddress)
+            XCTAssertTrue(parser.isOnChainZK())
+            XCTAssertEqual(parser.onChainEncryptionText, "ID1")
+            XCTAssertEqual(parser.onChainEncryptionSecret, "SEC1")
+        }
+        let tabbed = QRParser("bitcoin:1attac\tkeraddr?branta_id=ID1&branta_secret=SEC1")
+        XCTAssertEqual(tabbed.destination, "1attackeraddr")
+        XCTAssertEqual(QRParser("lightnin\tg:lnbc100n1ptest").destinationType, .bolt11)
     }
 
     func testOnChainZKRequiresBothParams() {
@@ -110,6 +127,12 @@ final class QRParserTests: XCTestCase {
 
     func testTrim() {
         XCTAssertEqual(QRParser("  1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa  ").destination, "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
+    }
+
+    func testOtherSchemeStaysUntyped() {
+        let parser = QRParser("http://example.com")
+        XCTAssertEqual(parser.destination, "http://example.com")
+        XCTAssertNil(parser.destinationType)
     }
 }
 
@@ -121,20 +144,7 @@ final class PaymentBuilderTests: XCTestCase {
         XCTAssertEqual(payment.destinations.count, 1)
         XCTAssertEqual(payment.destinations[0].value, "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
         XCTAssertEqual(payment.destinations[0].type, .bitcoinAddress)
-        XCTAssertFalse(payment.destinations[0].isZk)
-    }
-
-    func testSetZK() {
-        let payment = PaymentBuilder()
-            .addDestination("addr1", type: .bitcoinAddress)
-            .setZK()
-            .addDestination("lnbc100n1ptest", type: .bolt11)
-            .setZK()
-            .build()
-        XCTAssertTrue(payment.destinations[0].isZk)
-        XCTAssertTrue(payment.destinations[1].isZk)
-        XCTAssertNotEqual(payment.destinations[0].zkID, payment.destinations[1].zkID)
-        XCTAssertEqual(payment.destinations[0].zkID, payment.destinations[0].zkID?.lowercased())
+        XCTAssertNil(payment.destinations[0].id)
     }
 
     func testMetadataDescriptionTTLAndChild() {
@@ -156,27 +166,20 @@ final class PaymentBuilderTests: XCTestCase {
         XCTAssertEqual(payment.childPlatform?.name, "ChildBrand")
         XCTAssertEqual(payment.childPlatform?.logoURL, "https://child.com/logo.png")
     }
-
-    func testSetZKWithNoDestinations() {
-        XCTAssertTrue(PaymentBuilder().setZK().build().destinations.isEmpty)
-    }
 }
 
 final class WireFormatTests: XCTestCase {
-    func testDestinationWireNames() throws {
+    func testDestinationWireAlwaysSendsZkTrue() throws {
         let destination = Destination(
             value: "abc",
             isPrimary: true,
-            isZk: true,
             type: .bitcoinAddress,
-            zkID: "zk-1",
+            id: "zk-1",
             encryptedDek: "dek",
-            isEncrypted: true
+            isEncrypted: false
         )
-        let payment = Payment(destinations: [destination], ttl: 0)
-        let object = try jsonObject(WireCoding.encode(payment))
-        let destinations = object["destinations"] as? [[String: Any]]
-        let first = try XCTUnwrap(destinations?.first)
+        let object = try jsonObject(WireCoding.encode(Payment(destinations: [destination])))
+        let first = try XCTUnwrap((object["destinations"] as? [[String: Any]])?.first)
         XCTAssertEqual(first["value"] as? String, "abc")
         XCTAssertEqual(first["primary"] as? Bool, true)
         XCTAssertEqual(first["zk"] as? Bool, true)
@@ -184,9 +187,11 @@ final class WireFormatTests: XCTestCase {
         XCTAssertEqual(first["zk_id"] as? String, "zk-1")
         XCTAssertEqual(first["encrypted_dek"] as? String, "dek")
         XCTAssertNil(first["is_encrypted"])
+        XCTAssertNil(object["ttl"])
+        XCTAssertNil(object["description"])
     }
 
-    func testPaymentOmitsParentPlatformAndClientFlags() throws {
+    func testPaymentOmitsDescriptionParentAndPluginVersion() throws {
         let payment = Payment(
             description: "desc",
             destinations: [Destination(value: "abc")],
@@ -197,21 +202,43 @@ final class WireFormatTests: XCTestCase {
             platformLogoURL: "https://example.com/logo.png",
             parentPlatform: Platform(name: "Parent"),
             childPlatform: Platform(name: "Child"),
-            btcPayServerPluginVersion: "1.0.0",
             isMetadataDecrypted: true
         )
         let object = try jsonObject(WireCoding.encode(payment))
-        XCTAssertEqual(object["btc_pay_server_plugin_version"] as? String, "1.0.0")
+        XCTAssertEqual(object["ttl"] as? Int, 600)
+        XCTAssertNil(object["description"])
+        XCTAssertNil(object["btc_pay_server_plugin_version"])
         XCTAssertEqual((object["child_platform"] as? [String: Any])?["name"] as? String, "Child")
         XCTAssertNil(object["parent_platform"])
         XCTAssertNil(object["is_metadata_decrypted"])
     }
 
-    func testDecodeParentPlatformAndZKID() throws {
-        let json = #"{"destinations":[{"value":"abc","zk_id":"ab12cd"}],"parent_platform":{"name":"Parent"}}"#
-        let payment = try WireCoding.decodePayment(Data(json.utf8))
-        XCTAssertEqual(payment.parentPlatform?.name, "Parent")
-        XCTAssertEqual(payment.destinations[0].zkID, "ab12cd")
+    func testDecodeZkAndParentPlatform() throws {
+        let encrypted = try WireCoding.decodePayment(Data(#"{"destinations":[{"value":"abc","zk":true,"zk_id":"ab12cd","type":"bolt12"}]}"#.utf8))
+        XCTAssertTrue(encrypted.destinations[0].isEncrypted)
+        XCTAssertEqual(encrypted.destinations[0].id, "ab12cd")
+        XCTAssertNil(encrypted.destinations[0].type)
+
+        let skipped = try WireCoding.decodePayment(Data(#"{"destinations":[{"value":"abc","zk":false}]}"#.utf8))
+        XCTAssertFalse(skipped.destinations[0].isEncrypted)
+        let missing = try WireCoding.decodePayment(Data(#"{"destinations":[{"value":"abc"}]}"#.utf8))
+        XCTAssertFalse(missing.destinations[0].isEncrypted)
+
+        let parent = try WireCoding.decodePayment(Data(#"{"destinations":[],"parent_platform":{"name":"Parent"}}"#.utf8))
+        XCTAssertEqual(parent.parentPlatform?.name, "Parent")
+    }
+
+    func testUnsetEnvironmentUsesStagingAndEmptyKeyDoesNotOverride() {
+        XCTAssertEqual(resolvedBaseURL(defaults: BrantaApiOptions(), override: nil), BrantaEnvironment.staging.url)
+        let defaults = BrantaApiOptions(environment: .production, apiKey: "parent", hmacSecret: "parent-secret")
+        let override = BrantaApiOptions(apiKey: "", hmacSecret: "")
+        XCTAssertEqual(resolvedAPIKey(defaults: defaults, override: override), "parent")
+        XCTAssertEqual(resolvedHMACSecret(defaults: defaults, override: override), "parent-secret")
+        XCTAssertEqual(resolvedBaseURL(defaults: defaults, override: override), BrantaEnvironment.production.url)
+        XCTAssertEqual(
+            resolvedBaseURL(defaults: defaults, override: BrantaApiOptions(environment: .localhost)),
+            BrantaEnvironment.localhost.url
+        )
     }
 
     private func jsonObject(_ data: Data) throws -> [String: Any] {

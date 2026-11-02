@@ -16,14 +16,7 @@ public final class PaymentBuilder {
         return self
     }
 
-    @discardableResult
-    public func setZK() -> PaymentBuilder {
-        guard let index = destinations.indices.last else { return self }
-        destinations[index].isZk = true
-        destinations[index].zkID = UUID().uuidString.lowercased()
-        return self
-    }
-
+    /// Stored on the payment and folded into encrypted metadata by `addPayment`.
     @discardableResult
     public func setDescription(_ description: String) -> PaymentBuilder {
         self.description = description
@@ -32,16 +25,15 @@ public final class PaymentBuilder {
 
     @discardableResult
     public func addMetadata(key: String, value: String) -> PaymentBuilder {
-        var map: [String: String] = [:]
+        var map: [String: Any] = [:]
         if let metadata, !metadata.isEmpty,
            let data = metadata.data(using: .utf8),
            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            for (existingKey, existingValue) in parsed {
-                map[existingKey] = stringValue(existingValue)
-            }
+            map = parsed
         }
         map[key] = value
-        if let data = try? JSONSerialization.data(withJSONObject: map),
+        if JSONSerialization.isValidJSONObject(map),
+           let data = try? JSONSerialization.data(withJSONObject: map),
            let encoded = String(data: data, encoding: .utf8) {
             self.metadata = encoded
         }
@@ -75,11 +67,5 @@ public final class PaymentBuilder {
             platformLogoURL: platformLogoURL,
             childPlatform: childPlatform
         )
-    }
-
-    private func stringValue(_ value: Any) -> String {
-        if let string = value as? String { return string }
-        if let number = value as? NSNumber { return number.stringValue }
-        return String(describing: value)
     }
 }

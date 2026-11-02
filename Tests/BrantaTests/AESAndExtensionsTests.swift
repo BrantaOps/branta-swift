@@ -69,12 +69,14 @@ final class ExtensionTests: XCTestCase {
         XCTAssertFalse(isSilentPayment("bc1qtest"))
     }
 
-    func testHashZKType() {
-        XCTAssertEqual(hashZKType(of: "lnbc100n1ptest"), .bolt11)
-        XCTAssertEqual(hashZKType(of: "ark1testaddress"), .arkAddress)
-        XCTAssertEqual(hashZKType(of: "tark1testaddress"), .arkAddress)
-        XCTAssertEqual(hashZKType(of: "sp1testaddress"), .silentPayment)
-        XCTAssertNil(hashZKType(of: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"))
+    func testDerivedKeyType() {
+        XCTAssertEqual(derivedKeyType(of: "lnbc100n1ptest"), .bolt11)
+        XCTAssertEqual(derivedKeyType(of: "ark1testaddress"), .arkAddress)
+        XCTAssertEqual(derivedKeyType(of: "tark1testaddress"), .arkAddress)
+        XCTAssertEqual(derivedKeyType(of: "sp1testaddress"), .silentPayment)
+        XCTAssertNil(derivedKeyType(of: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"))
+        XCTAssertNil(derivedKeyType(of: "lno1qqexample"))
+        XCTAssertNil(derivedKeyType(of: "LNURL1TESTVALUE"))
     }
 
     func testNormalizedHash() {
@@ -83,13 +85,17 @@ final class ExtensionTests: XCTestCase {
     }
 
     func testURLFragment() {
+        XCTAssertEqual(urlFragment(for: []), "")
         XCTAssertEqual(urlFragment(for: [("id1", "secret1"), ("id2", "secret2")]), "#k-id1=secret1&k-id2=secret2")
         XCTAssertEqual(urlFragment(for: [("abc", "xyz")]), "#k-abc=xyz")
+        XCTAssertEqual(urlFragment(for: [("k a", "x&y")]), "#k-k%20a=x%26y")
+        XCTAssertEqual(fragmentEscape("!*'()"), "!*'()")
     }
 
-    func testJavaURLEncoding() {
-        XCTAssertEqual(javaURLEncode("abc+def=="), "abc%2Bdef%3D%3D")
-        XCTAssertEqual(javaURLEncode("hello world"), "hello+world")
-        XCTAssertEqual(javaURLDecode("abc%2Bdef%3D%3D"), "abc+def==")
+    func testPathEscapeEncodesBase64Alphabet() {
+        XCTAssertEqual(pathEscape("abc+def=="), "abc%2Bdef%3D%3D")
+        XCTAssertEqual(pathEscape("hello world"), "hello%20world")
+        XCTAssertEqual(pathUnescape("abc%2Bdef%3D%3D"), "abc+def==")
+        XCTAssertEqual(pathUnescape("a+b"), "a+b")
     }
 }

@@ -2,24 +2,24 @@ import XCTest
 @testable import Branta
 
 final class FakeClient: BrantaClienting {
-    var getImpl: (String, BrantaClientOptions?) async throws -> [Payment] = { _, _ in [] }
-    var postImpl: (Payment, BrantaClientOptions?) async throws -> Payment? = { _, _ in nil }
-    var keyImpl: (BrantaClientOptions?) async throws -> Bool = { _ in false }
-    var gets: [(String, BrantaClientOptions?)] = []
+    var getImpl: (String, BrantaApiOptions?) async throws -> [Payment] = { _, _ in [] }
+    var postImpl: (Payment, BrantaApiOptions?) async throws -> Payment? = { payment, _ in payment }
+    var keyImpl: (BrantaApiOptions?) async throws -> Bool = { _ in false }
+    var gets: [String] = []
     var posts: [Payment] = []
-    var keyCalls: [BrantaClientOptions?] = []
+    var keyCalls: [BrantaApiOptions?] = []
 
-    func getPayments(destinationValue: String, options: BrantaClientOptions?) async throws -> [Payment] {
-        gets.append((destinationValue, options))
+    func getPayments(destinationValue: String, options: BrantaApiOptions?) async throws -> [Payment] {
+        gets.append(destinationValue)
         return try await getImpl(destinationValue, options)
     }
 
-    func postPayment(_ payment: Payment, options: BrantaClientOptions?) async throws -> Payment? {
+    func postPayment(_ payment: Payment, options: BrantaApiOptions?) async throws -> Payment? {
         posts.append(payment)
         return try await postImpl(payment, options)
     }
 
-    func isAPIKeyValid(options: BrantaClientOptions?) async throws -> Bool {
+    func isAPIKeyValid(options: BrantaApiOptions?) async throws -> Bool {
         keyCalls.append(options)
         return try await keyImpl(options)
     }
@@ -41,17 +41,21 @@ final class FakeAES: AESEncrypting {
     var decryptMap: [DecryptCall: String] = [:]
     var encryptCalls: [EncryptCall] = []
     var decryptCalls: [DecryptCall] = []
+    var encryptImpl: ((String, String, Bool) throws -> String)?
+    var decryptImpl: ((String, String) throws -> String)?
 
     func encrypt(value: String, secret: String, deterministicNonce: Bool) throws -> String {
         let call = EncryptCall(value: value, secret: secret, deterministic: deterministicNonce)
         encryptCalls.append(call)
+        if let encryptImpl { return try encryptImpl(value, secret, deterministicNonce) }
         if let result = encryptMap[call] { return result }
-        throw AESError(message: "unexpected encrypt \(value)")
+        return "enc:" + value
     }
 
     func decrypt(encryptedValue: String, secret: String) throws -> String {
         let call = DecryptCall(value: encryptedValue, secret: secret)
         decryptCalls.append(call)
+        if let decryptImpl { return try decryptImpl(encryptedValue, secret) }
         if let result = decryptMap[call] { return result }
         throw AESError(message: "Decryption failed: auth tag mismatch")
     }
@@ -67,503 +71,329 @@ final class FakeSecrets: SecretGenerating {
     }
 
     func generate() -> String {
-        let value = values[min(index, values.count - 1)]
+        let value = values.isEmpty ? "secret" : values[min(index, values.count - 1)]
         index += 1
         return value
     }
 }
 
 final class ServiceTests: XCTestCase {
+    private let addr = "bc1q6745z6cy3u0k9nprurh3x804c4r7u3u8vxca2n"
+    private let invoice = "lnbc10u1p4w23tzpp5example"
     private let bitcoin = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
-    private let encryptedBitcoin = "encrypted-bitcoin-address"
-    private let secret = "test-secret"
-    private let bolt11 = "lnbc100n1ptest"
-    private let encryptedBolt11 = "encrypted-bolt11-value"
-    private let decryptedBolt11 = "lnbc100n1pdecrypted"
-    private let ark = "ark100testaddress"
-    private let encryptedArk = "encrypted-ark-address"
     private let swapped = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
-    private let bech32 = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
-    private let encryptedBech32 = "encrypted-bech32-address"
-    private let plainMetadata = #"{"email":"test@example.com"}"#
-    private let encryptedMetadata = "encrypted-metadata-ciphertext"
-    private let dek = "test-dek"
-    private let encryptedDekBitcoin = "encrypted-dek-for-bitcoin"
-    private let encryptedDekBolt11 = "encrypted-dek-for-bolt11"
-    private let encryptedDekValue = "encrypted-dek-blob"
-    private let decryptedDek = "decrypted-dek-value"
-    private let decryptedMetadata = #"{"email":"alice@example.com"}"#
-    private let encryptedMetadataBlob = "encrypted-metadata-blob"
 
     private var client: FakeClient!
     private var aes: FakeAES!
-    private var loose: BrantaService!
-    private var strict: BrantaService!
-    private var bolt11Hash: String!
-    private var arkHash: String!
-
-    private var looseOptions: BrantaClientOptions {
-        BrantaClientOptions(baseURL: .localhost, defaultAPIKey: "test-api-key", privacy: .loose)
-    }
+    private var service: BrantaService!
 
     override func setUp() {
         super.setUp()
         client = FakeClient()
         aes = FakeAES()
-        bolt11Hash = normalizedHash(bolt11)
-        arkHash = normalizedHash(ark)
-        aes.decryptMap[.init(value: encryptedBitcoin, secret: secret)] = bitcoin
-        aes.decryptMap[.init(value: encryptedBolt11, secret: bolt11Hash)] = decryptedBolt11
-        aes.decryptMap[.init(value: encryptedArk, secret: arkHash)] = ark
-        aes.encryptMap[.init(value: bolt11, secret: bolt11Hash, deterministic: true)] = encryptedBolt11
-        aes.encryptMap[.init(value: bitcoin, secret: secret, deterministic: false)] = encryptedBitcoin
-        aes.encryptMap[.init(value: ark, secret: arkHash, deterministic: true)] = encryptedArk
-        let secrets = FakeSecrets([secret])
-        loose = BrantaService(options: looseOptions, client: client, aes: aes, secretGenerator: secrets)
-        strict = BrantaService(
-            options: BrantaClientOptions(baseURL: .localhost, defaultAPIKey: "test-api-key", privacy: .strict),
+        service = BrantaService(
+            options: BrantaApiOptions(environment: .localhost, apiKey: "test-api-key"),
             client: client,
             aes: aes,
-            secretGenerator: FakeSecrets([secret])
+            secretGenerator: FakeSecrets(["bitcoin-secret"])
         )
     }
 
-    private func zkBitcoin() -> Payment {
-        PaymentBuilder().addDestination(encryptedBitcoin, type: .bitcoinAddress).setZK().build()
+    private func encrypted(_ value: String, id: String, type: DestinationType) -> Destination {
+        Destination(value: value, type: type, id: id, isEncrypted: true)
     }
 
-    private func plainBitcoin() -> Payment {
-        PaymentBuilder().addDestination(bitcoin, type: .bitcoinAddress).build()
+    func testBareAddressIsUnknownWithoutLookup() async throws {
+        let result = try await service.verify("bitcoin:\(addr)")
+        XCTAssertEqual(result.status, .unknown)
+        XCTAssertTrue(result.payments.isEmpty)
+        XCTAssertTrue(client.gets.isEmpty)
+        XCTAssertTrue(result.verifyURL.contains("/v2/verify/\(addr)"))
+        XCTAssertFalse(result.verifyURL.contains("#"))
     }
 
-    func testQRZKBitcoinDecrypts() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let result = try await loose.getPaymentsByQRCode("bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)")
-        XCTAssertEqual(client.gets.map(\.0), [encryptedBitcoin])
-        XCTAssertEqual(result.payments[0].destinations[0].value, bitcoin)
+    func testTestnetAddressIsUnknownWithoutLookup() async throws {
+        let result = try await service.verify("tb1qshra2mlujc9wfscvn4d8aqpyqgxzl55853xg7s")
+        XCTAssertEqual(result.status, .unknown)
+        XCTAssertTrue(client.gets.isEmpty)
     }
 
-    func testQRPlainBitcoinLooksUpAddress() async throws {
-        client.getImpl = { _, _ in [self.plainBitcoin()] }
-        let result = try await loose.getPaymentsByQRCode("bitcoin:\(bitcoin)")
-        XCTAssertEqual(client.gets.map(\.0), [bitcoin])
-        XCTAssertEqual(result.payments.count, 1)
+    func testBolt11MatchDecryptsToTheScannedInvoice() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher", id: "zk-1", type: .bolt11)])] }
+        aes.decryptMap[.init(value: "cipher", secret: normalizedHash(invoice))] = invoice
+        let result = try await service.verify("lightning:\(invoice)")
+        XCTAssertEqual(result.status, .match)
+        XCTAssertEqual(result.payments[0].destinations[0].value, invoice)
+        XCTAssertTrue(result.verifyURL.contains("#k-zk-1="))
+        XCTAssertEqual(client.gets, ["enc:\(invoice)"])
     }
 
-    func testQRLightningUsesEncryptedLookup() async throws {
-        client.getImpl = { _, _ in [PaymentBuilder().addDestination(self.bolt11, type: .bolt11).build()] }
-        _ = try await loose.getPaymentsByQRCode("lightning:\(bolt11)")
-        _ = try await loose.getPaymentsByQRCode("lightning:\(bolt11.uppercased())")
-        XCTAssertEqual(client.gets.map(\.0), [encryptedBolt11, encryptedBolt11])
+    func testBolt11DifferentPlaintextIsTampered() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher", id: "zk-1", type: .bolt11)])] }
+        aes.decryptImpl = { _, _ in "lnbc1other" }
+        let result = try await service.verify(invoice)
+        XCTAssertEqual(result.status, .tampered)
+        XCTAssertTrue(result.payments.isEmpty)
+        XCTAssertEqual(result.verifyURL, "http://localhost:3000/v2/verify/\(invoice)")
     }
 
-    func testQRBolt11LeavesUnrelatedBitcoinEncrypted() async throws {
-        let payment = PaymentBuilder()
-            .addDestination(encryptedBolt11, type: .bolt11).setZK()
-            .addDestination(encryptedBitcoin, type: .bitcoinAddress).setZK()
-            .build()
-        client.getImpl = { _, _ in [payment] }
-        let result = try await loose.getPaymentsByQRCode("lightning:\(bolt11)")
-        XCTAssertEqual(result.payments[0].destinations[0].value, decryptedBolt11)
-        XCTAssertFalse(result.payments[0].destinations[0].isEncrypted)
-        XCTAssertEqual(result.payments[0].destinations[1].value, encryptedBitcoin)
-        XCTAssertTrue(result.payments[0].destinations[1].isEncrypted)
+    func testBolt11MatchIsCaseInsensitive() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher", id: "zk-1", type: .bolt11)])] }
+        aes.decryptImpl = { _, _ in self.invoice }
+        let result = try await service.verify(invoice.uppercased())
+        XCTAssertEqual(result.status, .match)
+        XCTAssertEqual(result.payments[0].destinations[0].value, invoice)
     }
 
-    func testCombinedZKQRDecryptsAll() async throws {
-        let payment = PaymentBuilder()
-            .addDestination(encryptedBitcoin, type: .bitcoinAddress).setZK()
-            .addDestination(encryptedBolt11, type: .bolt11).setZK()
-            .addDestination(encryptedArk, type: .arkAddress).setZK()
-            .build()
-        client.getImpl = { _, _ in [payment] }
-        let qr = "bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)&lightning=\(bolt11)&ark=\(ark)"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        let ids = payment.destinations.map(\.zkID)
-        XCTAssertTrue(result.verifyURL.contains("k-\(ids[0]!)=\(secret)"))
-        XCTAssertTrue(result.verifyURL.contains("k-\(ids[1]!)=\(bolt11Hash!)"))
-        XCTAssertTrue(result.verifyURL.contains("k-\(ids[2]!)=\(arkHash!)"))
-        XCTAssertEqual(result.payments[0].destinations[0].value, bitcoin)
-        XCTAssertEqual(result.payments[0].destinations[1].value, decryptedBolt11)
+    func testOnChainMatch() async throws {
+        client.getImpl = { lookup, _ in
+            XCTAssertEqual(lookup, "cipher-id")
+            return [Payment(destinations: [self.encrypted("cipher", id: "zk-1", type: .bitcoinAddress)])]
+        }
+        aes.decryptImpl = { _, _ in self.addr }
+        let qr = "bitcoin:\(addr)?branta_id=cipher-id&branta_secret=the-secret"
+        let result = try await service.verify(qr)
+        XCTAssertEqual(result.status, .match)
+        XCTAssertEqual(result.payments[0].destinations[0].value, addr)
+        XCTAssertTrue(result.verifyURL.hasSuffix("/v2/verify/cipher-id#k-zk-1=the-secret"))
     }
 
-    func testSwappedAddressRejects() async {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:\(swapped)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
+    func testSwappedAddressIsTampered() async throws {
+        let other = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher", id: "zk-1", type: .bitcoinAddress)])] }
+        aes.decryptImpl = { _, _ in self.addr }
+        let qr = "bitcoin:\(other)?branta_id=cipher-id&branta_secret=the-secret"
+        let result = try await service.verify(qr)
+        XCTAssertEqual(result.status, .tampered)
+        XCTAssertTrue(result.payments.isEmpty)
+        XCTAssertFalse(result.verifyURL.contains("#"))
+    }
+
+    func testBrantaParamsWithoutPayableDestinationAreUnknown() async throws {
+        let result = try await service.verify("bitcoin:?branta_id=cipher-id&branta_secret=the-secret")
+        XCTAssertEqual(result.status, .unknown)
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    func testUnverifiableInstructionIsUnknownWithoutLookup() async throws {
+        let result = try await service.verify("bitcoin:\(addr)?lno=lno1qqexample")
+        XCTAssertEqual(result.status, .unknown)
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    func testServerErrorIsIncomplete() async throws {
+        client.getImpl = { _, _ in throw LookupFailure.incomplete }
+        let result = try await service.verify(invoice)
+        XCTAssertEqual(result.status, .incomplete)
+        XCTAssertEqual(result.verifyURL, "http://localhost:3000/v2/verify/\(invoice)")
+    }
+
+    func testLogoMismatchStillErrors() async {
+        client.getImpl = { _, _ in throw BrantaPaymentError(message: "platformLogoUrl domain does not match the configured baseUrl domain") }
         do {
-            _ = try await loose.getPaymentsByQRCode(qr)
-            XCTFail("expected tamper")
+            _ = try await service.verify(invoice)
+            XCTFail("expected throw")
         } catch let error as BrantaPaymentError {
-            XCTAssertEqual(error.reason, .tampered)
+            XCTAssertTrue(error.message.contains("platformLogoUrl"))
         } catch {
             XCTFail("unexpected \(error)")
+        }
+    }
+
+    func testNotFoundIsUnknown() async throws {
+        client.getImpl = { _, _ in [] }
+        let result = try await service.verify(invoice)
+        XCTAssertEqual(result.status, .unknown)
+        XCTAssertTrue(result.payments.isEmpty)
+    }
+
+    func testAddPaymentLeavesCallerPlaintext() async throws {
+        let payment = PaymentBuilder()
+            .addDestination(addr, type: .bitcoinAddress)
+            .setDescription("Invoice")
+            .build()
+        payment.destinations[0].id = "zk-1"
+        let posting = BrantaService(
+            options: BrantaApiOptions(environment: .localhost),
+            client: client,
+            aes: aes,
+            secretGenerator: FakeSecrets(["dek", "bitcoin-secret"])
+        )
+        let result = try await posting.addPayment(payment)
+        XCTAssertEqual(payment.destinations[0].value, addr)
+        XCTAssertEqual(payment.description, "Invoice")
+        XCTAssertNil(payment.metadata)
+        XCTAssertEqual(client.posts[0].destinations[0].value, "enc:\(addr)")
+        XCTAssertNil(client.posts[0].description)
+        let folded = aes.encryptCalls.first { $0.secret == "dek" }
+        XCTAssertEqual(folded?.value.contains("Invoice"), true)
+        XCTAssertEqual(client.posts[0].metadata, "enc:\(folded?.value ?? "")")
+        XCTAssertEqual(result.secret, "bitcoin-secret")
+    }
+
+    func testAddPaymentRetryEncryptsTheOriginalAddress() async throws {
+        var calls = 0
+        client.postImpl = { payment, _ in
+            calls += 1
+            if calls == 1 { throw BrantaPaymentError(message: "request failed with status 500") }
+            return payment
+        }
+        aes.encryptImpl = { value, secret, _ in "enc-\(secret):\(value)" }
+        let payment = Payment(destinations: [Destination(value: addr, type: .bitcoinAddress, id: "zk-1")])
+        let posting = BrantaService(
+            options: BrantaApiOptions(environment: .localhost),
+            client: client,
+            aes: aes,
+            secretGenerator: FakeSecrets(["first", "retry"])
+        )
+        do {
+            _ = try await posting.addPayment(payment)
+            XCTFail("expected post failure")
+        } catch is BrantaPaymentError {}
+        XCTAssertEqual(payment.destinations[0].value, addr)
+        let result = try await posting.addPayment(payment)
+        XCTAssertTrue(result.payment.destinations[0].value.contains("retry:\(addr)"))
+        XCTAssertFalse(client.posts[1].destinations[0].value.contains("enc-first"))
+    }
+
+    func testAddPaymentBolt11UsesDerivedKey() async throws {
+        aes.encryptImpl = { value, secret, deterministic in
+            XCTAssertTrue(deterministic)
+            XCTAssertEqual(secret, normalizedHash(self.invoice))
+            XCTAssertEqual(value, self.invoice)
+            return "cipher"
+        }
+        let payment = Payment(destinations: [Destination(value: invoice.uppercased(), type: .bolt11, id: "zk-1")])
+        _ = try await service.addPayment(payment)
+        XCTAssertEqual(payment.destinations[0].value, invoice.uppercased())
+        XCTAssertEqual(client.posts[0].destinations[0].value, "cipher")
+    }
+
+    func testAddPaymentUnsupportedTypeLeavesCallerUnchanged() async {
+        let payment = Payment(destinations: [Destination(value: "user@example.com", id: "zk-1")])
+        do {
+            _ = try await service.addPayment(payment)
+            XCTFail("expected throw")
+        } catch let error as BrantaPaymentError {
+            XCTAssertEqual(error.message, "destination type '' cannot be encrypted")
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+        XCTAssertEqual(payment.destinations[0].value, "user@example.com")
+        XCTAssertTrue(client.posts.isEmpty)
+    }
+
+    func testAddPaymentEmptyResponseErrors() async {
+        client.postImpl = { _, _ in nil }
+        let payment = Payment(destinations: [Destination(value: addr, type: .bitcoinAddress)])
+        do {
+            _ = try await service.addPayment(payment)
+            XCTFail("expected throw")
+        } catch let error as BrantaPaymentError {
+            XCTAssertEqual(error.message, "No payment returned from server.")
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+        XCTAssertEqual(payment.destinations[0].value, addr)
+    }
+
+    func testFragmentEncodesReservedCharacters() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher", id: "a b", type: .bolt11)])] }
+        aes.encryptImpl = { _, _, _ in "lookup" }
+        aes.decryptImpl = { _, _ in self.invoice }
+        let result = try await service.verify(invoice)
+        XCTAssertEqual(result.status, .match)
+        XCTAssertTrue(result.verifyURL.contains("#k-a%20b="))
+    }
+
+    func testMetadataDecryptLiftsDescription() async throws {
+        let meta = #"{"description":"Invoice"}"#
+        let destination = encrypted("cipher", id: "zk-1", type: .bitcoinAddress)
+        destination.encryptedDek = "enc-dek"
+        client.getImpl = { _, _ in [Payment(destinations: [destination], metadata: "enc-meta")] }
+        aes.decryptImpl = { value, _ in
+            switch value {
+            case "cipher": return self.addr
+            case "enc-dek": return "dek"
+            case "enc-meta": return meta
+            default: throw AESError(message: value)
+            }
+        }
+        let result = try await service.verify("bitcoin:\(addr)?branta_id=cipher-id&branta_secret=the-secret")
+        XCTAssertEqual(result.status, .match)
+        XCTAssertEqual(result.payments[0].description, "Invoice")
+        XCTAssertEqual(result.payments[0].metadata, meta)
+    }
+
+    func testConflictingOnChainAddressesAreTamperedBeforeLookup() async throws {
+        let qr = "bitcoin:\(addr)?bc=\(bitcoin)&branta_id=cipher-id&branta_secret=the-secret"
+        let result = try await service.verify(qr)
+        XCTAssertEqual(result.status, .tampered)
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    func testAttackerLegsAndWrongSecretAreUnknown() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher", id: "zk-1", type: .bitcoinAddress)])] }
+        aes.decryptMap[.init(value: "cipher", secret: "the-secret")] = bitcoin
+        let legs = [
+            "bitcoin:\(bitcoin)?branta_id=cipher&branta_secret=the-secret&lightning=lnbc1attacker",
+            "bitcoin:\(bitcoin)?branta_id=cipher&branta_secret=the-secret&ark=ark1attacker",
+            "bitcoin:\(bitcoin)?branta_id=cipher&branta_secret=the-secret&sp=sp1attacker",
+            "bitcoin:\(bitcoin)?branta_id=cipher&branta_secret=wrong-secret",
+        ]
+        for qr in legs {
+            let result = try await service.verify(qr)
+            XCTAssertEqual(result.status, .unknown, qr)
+            XCTAssertTrue(result.payments.isEmpty, qr)
         }
     }
 
     func testBech32CaseMatchesAndBase58DoesNot() async throws {
-        aes.decryptMap[.init(value: encryptedBech32, secret: secret)] = bech32
-        let bech32Payment = PaymentBuilder().addDestination(encryptedBech32, type: .bitcoinAddress).setZK().build()
-        client.getImpl = { value, _ in
-            value == self.encryptedBech32 ? [bech32Payment] : [self.zkBitcoin()]
-        }
-        let upper = try await loose.getPaymentsByQRCode("bitcoin:\(bech32.uppercased())?branta_id=\(encryptedBech32)&branta_secret=\(secret)")
+        let bech32 = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher", id: "zk-1", type: .bitcoinAddress)])] }
+        aes.decryptImpl = { _, _ in bech32 }
+        let upper = try await service.verify("bitcoin:\(bech32.uppercased())?branta_id=cipher-id&branta_secret=the-secret")
+        XCTAssertEqual(upper.status, .match)
         XCTAssertEqual(upper.payments[0].destinations[0].value, bech32)
 
-        do {
-            _ = try await loose.getPaymentsByQRCode("bitcoin:\(bitcoin.lowercased())?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)")
-            XCTFail("expected tamper")
-        } catch let error as BrantaPaymentError {
-            XCTAssertEqual(error.reason, .tampered)
-        }
-    }
-
-    func testLightningQRWithZKParamsSkipsAddressComparison() async throws {
-        let payment = PaymentBuilder()
-            .addDestination(encryptedBitcoin, type: .bitcoinAddress).setZK()
-            .addDestination(encryptedBolt11, type: .bolt11).setZK()
-            .build()
-        client.getImpl = { _, _ in [payment] }
-        let qr = "lightning:\(bolt11)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertEqual(result.payments[0].destinations[0].value, bitcoin)
-        XCTAssertEqual(result.payments[0].destinations[1].value, decryptedBolt11)
-    }
-
-    // MARK: QR payable binding
-    // A hit means every payable instruction in the QR decrypted to a destination on the record.
-
-    func testSwappedAddressAndWrongSecretReturnsNoPayments() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:\(swapped)?branta_id=\(encryptedBitcoin)&branta_secret=wrong-secret"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertTrue(result.payments.isEmpty)
-    }
-
-    func testWrongSecretWithBitcoinPathReturnsNoPayments() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=wrong-secret"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertTrue(result.payments.isEmpty)
-    }
-
-    func testAttackerLightningLegReturnsNoPayments() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)&lightning=lnbc1attacker"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertTrue(result.payments.isEmpty)
-    }
-
-    func testAttackerArkLegReturnsNoPayments() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)&ark=ark1attacker"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertTrue(result.payments.isEmpty)
-    }
-
-    func testAttackerSilentPaymentLegReturnsNoPayments() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:\(bitcoin)?branta_id=\(encryptedBitcoin)&branta_secret=\(secret)&sp=sp1attacker"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertTrue(result.payments.isEmpty)
-    }
-
-    func testBip321BcSwapRejects() async {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:?bc=\(swapped)&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
-        do {
-            _ = try await loose.getPaymentsByQRCode(qr)
-            XCTFail("expected tamper")
-        } catch let error as BrantaPaymentError {
-            XCTAssertEqual(error.reason, .tampered)
-        } catch {
-            XCTFail("unexpected \(error)")
-        }
-    }
-
-    func testBip321TbSwapRejects() async {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:\(bitcoin)?tb=tb1qattacker&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
-        do {
-            _ = try await loose.getPaymentsByQRCode(qr)
-            XCTFail("expected tamper")
-        } catch let error as BrantaPaymentError {
-            XCTAssertEqual(error.reason, .tampered)
-            XCTAssertTrue(client.gets.isEmpty)
-        } catch {
-            XCTFail("unexpected \(error)")
-        }
+        aes.decryptImpl = { _, _ in self.bitcoin }
+        let lowered = try await service.verify("bitcoin:\(bitcoin.lowercased())?branta_id=cipher-id&branta_secret=the-secret")
+        XCTAssertEqual(lowered.status, .tampered)
     }
 
     func testBip321BcMatchResolves() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:?bc=\(bitcoin)&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertEqual(result.payments.count, 1)
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher", id: "zk-1", type: .bitcoinAddress)])] }
+        aes.decryptImpl = { _, _ in self.bitcoin }
+        let result = try await service.verify("bitcoin:?bc=\(bitcoin)&branta_id=cipher-id&branta_secret=the-secret")
+        XCTAssertEqual(result.status, .match)
         XCTAssertEqual(result.payments[0].destinations[0].value, bitcoin)
         XCTAssertFalse(result.payments[0].destinations[0].isEncrypted)
     }
 
-    func testPathAndBcDisagreeRejectsBeforeLookup() async {
-        let qr = "bitcoin:\(bitcoin)?bc=\(swapped)&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
-        do {
-            _ = try await loose.getPaymentsByQRCode(qr)
-            XCTFail("expected tamper")
-        } catch let error as BrantaPaymentError {
-            XCTAssertEqual(error.reason, .tampered)
-            XCTAssertTrue(client.gets.isEmpty)
-        } catch {
-            XCTFail("unexpected \(error)")
+    func testBolt12AndLNURLAreUnknownWithoutLookup() async throws {
+        let bolt12 = try await service.verify("lightning:lno1qqexample")
+        let lnurl = try await service.verify("lightning:lnurl1qqexample")
+        let pay = try await service.verify("bitcoin:\(bitcoin)?pay=bitcoin:\(swapped)&branta_id=cipher&branta_secret=the-secret")
+        XCTAssertEqual(bolt12.status, .unknown)
+        XCTAssertEqual(lnurl.status, .unknown)
+        XCTAssertEqual(pay.status, .unknown)
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    func testZkFalseSkipsDecrypt() async throws {
+        client.getImpl = { _, _ in
+            [Payment(destinations: [Destination(value: "cipher", type: .bitcoinAddress, id: "zk-1", isEncrypted: false)])]
         }
-    }
-
-    func testPayInstructionReturnsNoPaymentsWithoutLookup() async throws {
-        let qr = "bitcoin:\(bitcoin)?pay=bitcoin:\(swapped)&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertTrue(result.payments.isEmpty)
-        XCTAssertTrue(client.gets.isEmpty)
-    }
-
-    func testLnoInstructionReturnsNoPaymentsWithoutLookup() async throws {
-        let qr = "bitcoin:\(bitcoin)?lno=lno1qqattacker&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertTrue(result.payments.isEmpty)
-        XCTAssertTrue(client.gets.isEmpty)
-    }
-
-    func testBolt12ParamReturnsNoPaymentsWithoutLookup() async throws {
-        let qr = "bitcoin:\(bitcoin)?bolt12=lno1qqattacker&branta_id=\(encryptedBitcoin)&branta_secret=\(secret)"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertTrue(result.payments.isEmpty)
-        XCTAssertTrue(client.gets.isEmpty)
-        XCTAssertTrue(result.verifyURL.contains("/v2/verify/"))
-    }
-
-    func testBolt12AndLNURLUrisReturnNoPaymentsWithoutLookup() async throws {
-        let bolt12 = try await loose.getPaymentsByQRCode("lightning:lno1qqexample")
-        XCTAssertTrue(bolt12.payments.isEmpty)
-        let lnurl = try await loose.getPaymentsByQRCode("lightning:lnurl1qqexample")
-        XCTAssertTrue(lnurl.payments.isEmpty)
-        XCTAssertTrue(client.gets.isEmpty)
-    }
-
-    func testNoPayableInstructionWrongSecretReturnsEncryptedRecord() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let qr = "bitcoin:?branta_id=\(encryptedBitcoin)&branta_secret=wrong-secret"
-        let result = try await loose.getPaymentsByQRCode(qr)
-        XCTAssertEqual(result.payments.count, 1)
-        XCTAssertEqual(result.payments[0].destinations[0].value, encryptedBitcoin)
-        XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
-    }
-
-    func testGetPaymentsPlainAndEmptyVerifyURL() async throws {
-        client.getImpl = { _, _ in [self.plainBitcoin()] }
-        let result = try await loose.getPayments(bitcoin)
-        XCTAssertEqual(result.payments[0].destinations[0].value, bitcoin)
-        XCTAssertEqual(result.verifyURL, "http://localhost:3000/v2/verify/\(bitcoin)")
-
-        client.getImpl = { _, _ in [] }
-        let empty = try await loose.getPayments(bitcoin)
-        XCTAssertTrue(empty.payments.isEmpty)
-        XCTAssertEqual(empty.verifyURL, "http://localhost:3000/v2/verify/\(bitcoin)")
-    }
-
-    func testGetPaymentsForwardsOptions() async throws {
-        client.getImpl = { _, _ in [self.plainBitcoin()] }
-        _ = try await loose.getPayments(bitcoin, options: looseOptions)
-        XCTAssertEqual(client.gets.last?.1, looseOptions)
-    }
-
-    func testZKBitcoinDecryptRequiresTheRightKey() async throws {
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let decrypted = try await loose.getPayments(encryptedBitcoin, destinationEncryptionKey: secret)
-        XCTAssertEqual(decrypted.payments[0].destinations[0].value, bitcoin)
-        XCTAssertTrue(decrypted.verifyURL.contains("#k-"))
-
-        aes.decryptCalls.removeAll()
-        let missing = try await loose.getPayments(encryptedBitcoin, destinationEncryptionKey: nil)
-        XCTAssertEqual(missing.payments[0].destinations[0].value, encryptedBitcoin)
-        XCTAssertTrue(missing.payments[0].destinations[0].isEncrypted)
-        XCTAssertTrue(aes.decryptCalls.isEmpty)
-
-        let wrong = try await loose.getPayments(encryptedBitcoin, destinationEncryptionKey: "wrong-key")
-        XCTAssertEqual(wrong.payments[0].destinations[0].value, encryptedBitcoin)
-        XCTAssertTrue(wrong.payments[0].destinations[0].isEncrypted)
-    }
-
-    func testPlainDestinationDoesNotDecrypt() async throws {
-        client.getImpl = { _, _ in [self.plainBitcoin()] }
-        aes.decryptCalls.removeAll()
-        _ = try await loose.getPayments(bitcoin, destinationEncryptionKey: secret)
+        let result = try await service.verify("bitcoin:\(addr)?branta_id=cipher-id&branta_secret=the-secret")
+        XCTAssertEqual(result.status, .unknown)
         XCTAssertTrue(aes.decryptCalls.isEmpty)
     }
 
-    func testBolt11HashLookupAndLooseFallback() async throws {
-        client.getImpl = { value, _ in
-            value == self.encryptedBolt11
-                ? [PaymentBuilder().addDestination(self.encryptedBolt11, type: .bolt11).setZK().build()]
-                : []
-        }
-        let result = try await loose.getPayments(bolt11)
-        XCTAssertEqual(result.payments[0].destinations[0].value, decryptedBolt11)
-        XCTAssertEqual(client.gets.map(\.0), [encryptedBolt11])
-
-        client.gets.removeAll()
-        client.getImpl = { _, _ in [] }
-        let missing = try await loose.getPayments(bolt11)
-        XCTAssertEqual(missing.verifyURL, "http://localhost:3000/v2/verify/\(bolt11)")
-        XCTAssertEqual(client.gets.map(\.0), [encryptedBolt11, bolt11])
-    }
-
-    func testAddPaymentEncryptsZKBitcoinAndBolt11() async throws {
-        let bitcoinPayment = PaymentBuilder().addDestination(bitcoin, type: .bitcoinAddress).setZK().build()
-        let zkID = bitcoinPayment.destinations[0].zkID
-        client.postImpl = { _, _ in
-            Payment(destinations: [Destination(value: self.encryptedBitcoin, isZk: true, type: .bitcoinAddress, zkID: zkID)])
-        }
-        let added = try await loose.addPayment(bitcoinPayment)
-        XCTAssertEqual(added.secret, secret)
-        XCTAssertEqual(bitcoinPayment.destinations[0].value, encryptedBitcoin)
-        XCTAssertEqual(added.verifyURL, "http://localhost:3000/v2/verify/\(encryptedBitcoin)#k-\(zkID!)=\(secret)")
-
-        let invoice = PaymentBuilder().addDestination(bolt11, type: .bolt11).setZK().build()
-        client.postImpl = { _, _ in
-            Payment(destinations: [Destination(value: self.encryptedBolt11, isZk: true, type: .bolt11, zkID: invoice.destinations[0].zkID)])
-        }
-        _ = try await loose.addPayment(invoice)
-        XCTAssertTrue(aes.encryptCalls.contains(.init(value: bolt11, secret: bolt11Hash, deterministic: true)))
-        XCTAssertEqual(invoice.destinations[0].value, encryptedBolt11)
-    }
-
-    func testAddPaymentPlainDoesNotEncryptAndUnsupportedZKThrows() async throws {
-        let plain = plainBitcoin()
-        client.postImpl = { payment, _ in payment }
-        aes.encryptCalls.removeAll()
-        _ = try await loose.addPayment(plain)
-        XCTAssertTrue(aes.encryptCalls.isEmpty)
-
-        client.posts.removeAll()
-        let tether = PaymentBuilder().addDestination("0xdeadbeef", type: .tetherAddress).setZK().build()
-        do {
-            _ = try await loose.addPayment(tether)
-            XCTFail("expected throw")
-        } catch is BrantaPaymentError {
-            XCTAssertTrue(client.posts.isEmpty)
-        }
-    }
-
-    func testAPIKeyValidForwardsOptions() async throws {
+    func testIsAPIKeyValidPassesThrough() async throws {
         client.keyImpl = { _ in true }
-        let valid = try await loose.isAPIKeyValid(options: looseOptions)
+        let options = BrantaApiOptions(apiKey: "child")
+        let valid = try await service.isAPIKeyValid(options: options)
         XCTAssertTrue(valid)
-        XCTAssertEqual(client.keyCalls.last ?? nil, looseOptions as BrantaClientOptions?)
-    }
-
-    func testStrictMode() async throws {
-        do {
-            _ = try await strict.getPayments(bitcoin)
-            XCTFail("expected throw")
-        } catch is BrantaPaymentError {}
-        XCTAssertTrue(client.gets.isEmpty)
-
-        client.getImpl = { _, _ in [self.zkBitcoin()] }
-        let decrypted = try await strict.getPayments(encryptedBitcoin, destinationEncryptionKey: secret)
-        XCTAssertEqual(decrypted.payments[0].destinations[0].value, bitcoin)
-        XCTAssertFalse(decrypted.payments[0].destinations[0].isEncrypted)
-
-        client.gets.removeAll()
-        client.getImpl = { value, _ in value == self.encryptedBolt11 ? [] : [self.plainBitcoin()] }
-        let fallback = try await strict.getPayments(bolt11)
-        XCTAssertTrue(fallback.payments.isEmpty)
-        XCTAssertEqual(fallback.verifyURL, "http://localhost:3000/v2/verify/\(encryptedBolt11)")
-        XCTAssertEqual(client.gets.map(\.0), [encryptedBolt11])
-
-        let emptyQR = try await strict.getPaymentsByQRCode("bitcoin:\(bitcoin)")
-        XCTAssertTrue(emptyQR.payments.isEmpty)
-        XCTAssertEqual(emptyQR.verifyURL, "http://localhost:3000/v2/verify/\(bitcoin)")
-
-        do {
-            _ = try await strict.addPayment(plainBitcoin())
-            XCTFail("expected throw")
-        } catch is BrantaPaymentError {}
-
-        let mixed = PaymentBuilder()
-            .addDestination(bitcoin, type: .bitcoinAddress).setZK()
-            .addDestination(bolt11, type: .bolt11)
-            .build()
-        do {
-            _ = try await strict.addPayment(mixed)
-            XCTFail("expected throw")
-        } catch is BrantaPaymentError {}
-
-        let zk = PaymentBuilder().addDestination(bitcoin, type: .bitcoinAddress).setZK().build()
-        client.postImpl = { _, _ in
-            Payment(destinations: [Destination(value: self.encryptedBitcoin, isZk: true, zkID: zk.destinations[0].zkID)])
-        }
-        _ = try await strict.addPayment(zk)
-        XCTAssertEqual(client.posts.count, 1)
-    }
-
-    func testMetadataEnvelope() async throws {
-        let aes2 = FakeAES()
-        aes2.encryptMap[.init(value: plainMetadata, secret: dek, deterministic: false)] = encryptedMetadata
-        aes2.encryptMap[.init(value: dek, secret: secret, deterministic: false)] = encryptedDekBitcoin
-        aes2.encryptMap[.init(value: bitcoin, secret: secret, deterministic: false)] = encryptedBitcoin
-        let service = BrantaService(
-            options: looseOptions,
-            client: client,
-            aes: aes2,
-            secretGenerator: FakeSecrets([dek, secret])
-        )
-        let payment = PaymentBuilder().addDestination(bitcoin, type: .bitcoinAddress).setZK().build()
-        payment.metadata = plainMetadata
-        client.postImpl = { _, _ in Payment(destinations: [Destination(value: self.encryptedBitcoin, isZk: true)]) }
-        _ = try await service.addPayment(payment)
-        XCTAssertEqual(payment.metadata, encryptedMetadata)
-        XCTAssertEqual(payment.destinations[0].encryptedDek, encryptedDekBitcoin)
-
-        let aes3 = FakeAES()
-        aes3.encryptMap[.init(value: plainMetadata, secret: dek, deterministic: false)] = encryptedMetadata
-        aes3.encryptMap[.init(value: dek, secret: bolt11Hash, deterministic: false)] = encryptedDekBolt11
-        aes3.encryptMap[.init(value: bolt11, secret: bolt11Hash, deterministic: true)] = encryptedBolt11
-        let boltService = BrantaService(options: looseOptions, client: client, aes: aes3, secretGenerator: FakeSecrets([dek, secret]))
-        let invoice = PaymentBuilder().addDestination(bolt11, type: .bolt11).setZK().build()
-        invoice.metadata = plainMetadata
-        client.postImpl = { _, _ in Payment(destinations: [Destination(value: self.encryptedBolt11, isZk: true)]) }
-        _ = try await boltService.addPayment(invoice)
-        XCTAssertEqual(invoice.destinations[0].encryptedDek, encryptedDekBolt11)
-
-        let plain = plainBitcoin()
-        plain.metadata = plainMetadata
-        client.postImpl = { payment, _ in payment }
-        aes.encryptCalls.removeAll()
-        _ = try await loose.addPayment(plain)
-        XCTAssertEqual(plain.metadata, plainMetadata)
-        XCTAssertNil(plain.destinations[0].encryptedDek)
-    }
-
-    func testMetadataDecryptsOnce() async throws {
-        aes.decryptMap[.init(value: encryptedDekValue, secret: bolt11Hash)] = decryptedDek
-        aes.decryptMap[.init(value: encryptedMetadataBlob, secret: decryptedDek)] = decryptedMetadata
-        let payment = Payment(
-            destinations: [
-                Destination(value: encryptedBolt11, isZk: true, type: .bolt11, zkID: "zk1", encryptedDek: encryptedDekValue),
-                Destination(value: encryptedArk, isZk: true, type: .arkAddress, zkID: "zk2", encryptedDek: "another-dek"),
-            ],
-            metadata: encryptedMetadataBlob
-        )
-        client.getImpl = { _, _ in [payment] }
-        let result = try await loose.getPayments(bolt11)
-        XCTAssertEqual(result.payments[0].metadata, decryptedMetadata)
-        XCTAssertTrue(result.payments[0].isMetadataDecrypted)
-        XCTAssertEqual(aes.decryptCalls.filter { $0.value == encryptedMetadataBlob }.count, 1)
-
-        let untouched = Payment(
-            destinations: [Destination(value: encryptedBolt11, isZk: true, type: .bolt11, zkID: "zk1")],
-            metadata: encryptedMetadataBlob
-        )
-        client.getImpl = { _, _ in [untouched] }
-        let left = try await loose.getPayments(bolt11)
-        XCTAssertEqual(left.payments[0].metadata, encryptedMetadataBlob)
-        XCTAssertFalse(left.payments[0].isMetadataDecrypted)
+        XCTAssertEqual(client.keyCalls.last ?? nil, options)
     }
 }

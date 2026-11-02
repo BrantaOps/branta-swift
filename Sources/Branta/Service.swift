@@ -11,12 +11,12 @@ struct GuidSecretGenerator: SecretGenerating {
 }
 
 public final class BrantaService {
-    private let defaultOptions: BrantaClientOptions?
+    private let defaultOptions: BrantaApiOptions?
     private let client: BrantaClienting
     private let aes: AESEncrypting
     private let secretGenerator: SecretGenerating
 
-    public init(options: BrantaClientOptions? = nil) {
+    public init(options: BrantaApiOptions = BrantaApiOptions()) {
         self.defaultOptions = options
         self.client = BrantaClient(defaultOptions: options)
         self.aes = AESEncryptionService()
@@ -24,7 +24,7 @@ public final class BrantaService {
     }
 
     init(
-        options: BrantaClientOptions?,
+        options: BrantaApiOptions?,
         client: BrantaClienting,
         aes: AESEncrypting,
         secretGenerator: SecretGenerating
@@ -35,249 +35,250 @@ public final class BrantaService {
         self.secretGenerator = secretGenerator
     }
 
-    public func getPaymentsByQRCode(_ qrText: String, options: BrantaClientOptions? = nil) async throws -> PaymentsResult {
-        let parser = QRParser(qrText)
-        let expectedOnChain = try uniformOnChainAddress(parser)
-
-        if parser.hasUnverifiableInstruction {
-            let lookup = parser.onChainEncryptionText ?? parser.destination ?? ""
-            return PaymentsResult(payments: [], verifyURL: try buildVerifyURL(options: options, paymentLookup: lookup))
+    /// Parses a scanned QR or pasted text and looks it up.
+    ///
+    /// A swapped address or a derived-key plaintext that is not the scanned value is `tampered`.
+    /// A 404 is `unknown`. Any other non-OK response, and a network failure, is `incomplete`.
+    /// A logo URL on the wrong origin still throws.
+    public func verify(_ input: String, options: BrantaApiOptions? = nil) async throws -> VerifyResult {
+        let parser = QRParser(input)
+        let lookup = errorLookup(parser)
+        do {
+            return try await verifyParsed(parser, options: options)
+        } catch LookupFailure.tampered {
+            return VerifyResult(status: .tampered, verifyURL: buildVerifyURL(options: options, paymentLookup: lookup))
+        } catch LookupFailure.incomplete {
+            return VerifyResult(status: .incomplete, verifyURL: buildVerifyURL(options: options, paymentLookup: lookup))
         }
-
-        if parser.isOnChainZK() {
-            let additional = parser.destinations.compactMap { destination -> String? in
-                hashZKType(of: destination.value) == nil ? nil : destination.value
-            }
-            return try await getPaymentsForZK(
-                lookupValue: parser.onChainEncryptionText ?? "",
-                encryptionKey: parser.onChainEncryptionSecret,
-                additionalHashValues: additional,
-                expectedOnChainAddress: expectedOnChain,
-                options: options
-            )
-        }
-
-        guard let destination = parser.destination else {
-            return PaymentsResult(payments: [], verifyURL: try buildVerifyURL(options: options, paymentLookup: ""))
-        }
-
-        if resolvedPrivacy(defaults: defaultOptions, override: options) == .strict && hashZKType(of: destination) == nil {
-            return PaymentsResult(payments: [], verifyURL: try buildVerifyURL(options: options, paymentLookup: destination))
-        }
-
-        return try await getPayments(destination, destinationEncryptionKey: nil, options: options)
     }
 
-    public func getPayments(
-        _ destinationValue: String,
-        destinationEncryptionKey: String? = nil,
-        options: BrantaClientOptions? = nil
-    ) async throws -> PaymentsResult {
-        let hashType = hashZKType(of: destinationValue)
-        if hashType == nil && destinationEncryptionKey == nil && resolvedPrivacy(defaults: defaultOptions, override: options) == .strict {
-            throw BrantaPaymentError(message: "PrivacyMode.Strict does not permit plain-text lookups for this destination type.")
-        }
-
-        let normalized = hashType == nil ? destinationValue : destinationValue.lowercased()
-        var lookupValue = destinationValue
-        if hashType != nil {
-            lookupValue = try aes.encrypt(value: normalized, secret: normalizedHash(normalized), deterministicNonce: true)
-        }
-
-        var payments = try await client.getPayments(destinationValue: lookupValue, options: options)
-        if payments.isEmpty && hashType != nil && resolvedPrivacy(defaults: defaultOptions, override: options) != .strict {
-            lookupValue = normalized
-            payments = try await client.getPayments(destinationValue: lookupValue, options: options)
-        }
-
-        var keys: [(String, String)] = []
-        for payment in payments {
-            try decryptDestinations(
-                payment: payment,
-                destinationValue: normalized,
-                encryptionKey: destinationEncryptionKey,
-                hashZKType: hashType,
-                keys: &keys,
-                expectedOnChainAddress: nil
-            )
-        }
-        return PaymentsResult(payments: payments, verifyURL: try buildVerifyURL(options: options, paymentLookup: lookupValue, keys: keys))
-    }
-
-    public func addPayment(_ payment: Payment, options: BrantaClientOptions? = nil) async throws -> AddPaymentResult {
-        if resolvedPrivacy(defaults: defaultOptions, override: options) == .strict && payment.destinations.contains(where: { !$0.isZk }) {
-            throw BrantaPaymentError(message: "PrivacyMode.Strict requires all destinations to be ZK; one or more destinations have isZk = false.")
-        }
+    /// Encrypts a copy of `payment` and posts that copy. A failed post leaves the caller's payment plaintext.
+    public func addPayment(_ payment: Payment, options: BrantaApiOptions? = nil) async throws -> AddPaymentResult {
+        let submitted = copyPayment(payment)
+        foldDescriptionIntoMetadata(submitted)
 
         var dek: String?
-        if payment.metadata != nil && payment.destinations.contains(where: { $0.isZk }) {
+        if let metadata = submitted.metadata, !metadata.isEmpty, !submitted.destinations.isEmpty {
             dek = secretGenerator.generate()
-            payment.metadata = try aes.encrypt(value: payment.metadata ?? "", secret: dek ?? "", deterministicNonce: false)
+            submitted.metadata = try aes.encrypt(value: metadata, secret: dek ?? "", deterministicNonce: false)
         }
 
         let secret = secretGenerator.generate()
         var encryptedToKey: [String: String] = [:]
 
-        for destination in payment.destinations {
-            guard destination.isZk else { continue }
-            if destination.type == .bitcoinAddress {
-                destination.value = try aes.encrypt(
+        for destination in submitted.destinations {
+            if destination.id?.isEmpty != false {
+                destination.id = UUID().uuidString.lowercased()
+            }
+
+            var destType = destination.type
+            if destType == nil {
+                destType = detectPlainTextType(destination.value)
+                if let destType {
+                    destination.type = destType
+                }
+            }
+
+            if destType == .bitcoinAddress {
+                let ciphertext = try aes.encrypt(
                     value: destination.value,
                     secret: secret,
                     deterministicNonce: secretGenerator.deterministicNonce
                 )
-                encryptedToKey[destination.value] = secret
+                destination.value = ciphertext
+                encryptedToKey[ciphertext] = secret
                 if let dek {
                     destination.encryptedDek = try aes.encrypt(value: dek, secret: secret, deterministicNonce: false)
                 }
-            } else {
-                guard let hashType = hashZKType(of: destination.value) else {
-                    throw BrantaPaymentError(message: "destination type '\(destination.type?.kotlinName ?? "null")' does not support ZK")
-                }
-                _ = hashType
-                let normalized = destination.value.lowercased()
-                let key = normalizedHash(normalized)
-                destination.value = try aes.encrypt(value: normalized, secret: key, deterministicNonce: true)
-                encryptedToKey[destination.value] = key
-                if let dek {
-                    destination.encryptedDek = try aes.encrypt(value: dek, secret: key, deterministicNonce: false)
-                }
+                continue
+            }
+
+            guard derivedKeyType(of: destination.value) != nil else {
+                let name = destination.type?.rawValue ?? ""
+                throw BrantaPaymentError(message: "destination type '\(name)' cannot be encrypted")
+            }
+            let normalized = destination.value.lowercased()
+            let key = normalizedHash(normalized)
+            let ciphertext = try aes.encrypt(value: normalized, secret: key, deterministicNonce: true)
+            destination.value = ciphertext
+            encryptedToKey[ciphertext] = key
+            if let dek {
+                destination.encryptedDek = try aes.encrypt(value: dek, secret: key, deterministicNonce: false)
             }
         }
 
-        guard let response = try await client.postPayment(payment, options: options) else {
+        let primary = submitted.destinations.first?.value ?? ""
+        guard let response = try await client.postPayment(submitted, options: options) else {
             throw BrantaPaymentError(message: "No payment returned from server.")
         }
 
         var keys: [(String, String)] = []
         for destination in response.destinations {
-            if let zkID = destination.zkID, let key = encryptedToKey[destination.value] {
-                if !keys.contains(where: { $0.0 == zkID }) {
-                    keys.append((zkID, key))
-                }
-            }
+            guard let id = destination.id, !id.isEmpty, let key = encryptedToKey[destination.value] else { continue }
+            if keys.contains(where: { $0.0 == id }) { continue }
+            keys.append((id, key))
         }
 
-        let primary = payment.destinations.first?.value ?? ""
         return AddPaymentResult(
             payment: response,
             secret: secret,
-            verifyURL: try buildVerifyURL(options: options, paymentLookup: primary, keys: keys)
+            verifyURL: buildVerifyURL(options: options, paymentLookup: primary, keys: keys)
         )
     }
 
-    public func isAPIKeyValid(options: BrantaClientOptions? = nil) async throws -> Bool {
+    public func isAPIKeyValid(options: BrantaApiOptions? = nil) async throws -> Bool {
         try await client.isAPIKeyValid(options: options)
     }
 
-    private func getPaymentsForZK(
+    private func verifyParsed(_ parser: QRParser, options: BrantaApiOptions?) async throws -> VerifyResult {
+        let expectedOnChain = try uniformOnChainAddress(parser)
+        let lookup = errorLookup(parser)
+
+        if parser.hasUnverifiableInstruction {
+            return VerifyResult(status: .unknown, verifyURL: buildVerifyURL(options: options, paymentLookup: lookup))
+        }
+
+        if parser.isOnChainZK() {
+            let additional = parser.destinations.compactMap { destination -> String? in
+                derivedKeyType(of: destination.value) == nil ? nil : destination.value
+            }
+            if (expectedOnChain ?? "").isEmpty && additional.isEmpty {
+                return VerifyResult(status: .unknown, verifyURL: buildVerifyURL(options: options, paymentLookup: lookup))
+            }
+            let (payments, verifyURL) = try await lookupByBrantaID(
+                lookupValue: parser.onChainEncryptionText,
+                encryptionKey: parser.onChainEncryptionSecret,
+                additionalHashValues: additional,
+                expectedOnChainAddress: expectedOnChain ?? "",
+                options: options
+            )
+            return toVerifyResult(payments, verifyURL)
+        }
+
+        let destination = parser.destination ?? ""
+        if derivedKeyType(of: destination) == nil {
+            return VerifyResult(status: .unknown, verifyURL: buildVerifyURL(options: options, paymentLookup: destination))
+        }
+
+        let (payments, verifyURL) = try await lookupByDerivedKey(destination, options: options)
+        return toVerifyResult(payments, verifyURL)
+    }
+
+    private func lookupByBrantaID(
         lookupValue: String,
-        encryptionKey: String?,
+        encryptionKey: String,
         additionalHashValues: [String],
-        expectedOnChainAddress: String?,
-        options: BrantaClientOptions?
-    ) async throws -> PaymentsResult {
+        expectedOnChainAddress: String,
+        options: BrantaApiOptions?
+    ) async throws -> ([Payment], String) {
         let payments = try await client.getPayments(destinationValue: lookupValue, options: options)
         var keys: [(String, String)] = []
         var bound: [Payment] = []
         for payment in payments {
             let onChainBound = try decryptDestinations(
                 payment: payment,
-                destinationValue: lookupValue,
                 encryptionKey: encryptionKey,
-                hashZKType: nil,
                 keys: &keys,
                 expectedOnChainAddress: expectedOnChainAddress
             )
             var hashesBound = true
             for value in additionalHashValues {
-                if !decryptHashZKDestinations(payment: payment, plainValue: value, keys: &keys) {
+                if try !decryptDerivedKeyDestinations(payment: payment, plainValue: value, keys: &keys) {
                     hashesBound = false
                 }
             }
-            if onChainBound && hashesBound {
+            let hasPayable = !expectedOnChainAddress.isEmpty || !additionalHashValues.isEmpty
+            if hasPayable && onChainBound && hashesBound {
                 bound.append(payment)
             }
         }
-        return PaymentsResult(payments: bound, verifyURL: try buildVerifyURL(options: options, paymentLookup: lookupValue, keys: keys))
+        return (bound, buildVerifyURL(options: options, paymentLookup: lookupValue, keys: keys))
     }
 
-    /// The single on-chain address every `bitcoin:` / `bc=` / `tb=` instruction in the QR agrees on.
+    private func lookupByDerivedKey(_ destinationValue: String, options: BrantaApiOptions?) async throws -> ([Payment], String) {
+        let normalized = destinationValue.lowercased()
+        let lookupValue = try aes.encrypt(value: normalized, secret: normalizedHash(normalized), deterministicNonce: true)
+        let payments = try await client.getPayments(destinationValue: lookupValue, options: options)
+        var keys: [(String, String)] = []
+        var bound: [Payment] = []
+        for payment in payments {
+            if try decryptDerivedKeyDestinations(payment: payment, plainValue: normalized, keys: &keys) {
+                bound.append(payment)
+            }
+        }
+        return (bound, buildVerifyURL(options: options, paymentLookup: lookupValue, keys: keys))
+    }
+
     private func uniformOnChainAddress(_ parser: QRParser) throws -> String? {
-        let addresses = parser.destinations
-            .filter { $0.type == .bitcoinAddress && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map(\.value)
-        guard let first = addresses.first else { return nil }
-        for address in addresses.dropFirst() where !addressesMatch(first, address) {
-            throw BrantaPaymentError(message: Self.tamperedMessage, reason: .tampered)
+        var first: String?
+        for destination in parser.destinations {
+            guard destination.type == .bitcoinAddress else { continue }
+            if destination.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            if first == nil {
+                first = destination.value
+                continue
+            }
+            if let first, !addressesMatch(first, destination.value) {
+                throw LookupFailure.tampered
+            }
         }
         return first
     }
 
-    private static let tamperedMessage =
-        "The Bitcoin address in the QR code does not match the address verified by Branta. The QR code may have been tampered with."
-
     @discardableResult
     private func decryptDestinations(
         payment: Payment,
-        destinationValue: String,
-        encryptionKey: String?,
-        hashZKType: DestinationType?,
+        encryptionKey: String,
         keys: inout [(String, String)],
-        expectedOnChainAddress: String?
+        expectedOnChainAddress: String
     ) throws -> Bool {
-        var onChainBound = expectedOnChainAddress == nil
+        var onChainBound = expectedOnChainAddress.isEmpty
         for destination in payment.destinations {
-            destination.isEncrypted = destination.isZk
-            guard destination.isZk else { continue }
-
-            if destination.type == .bitcoinAddress {
-                guard let encryptionKey else { continue }
-                let decrypted: String
-                do {
-                    decrypted = try aes.decrypt(encryptedValue: destination.value, secret: encryptionKey)
-                } catch {
-                    continue
-                }
-                if let expectedOnChainAddress, !addressesMatch(decrypted, expectedOnChainAddress) {
-                    throw BrantaPaymentError(message: Self.tamperedMessage, reason: .tampered)
-                }
-                if expectedOnChainAddress != nil { onChainBound = true }
-                destination.value = decrypted
-                destination.isEncrypted = false
-                putIfAbsent(zkID: destination.zkID, key: encryptionKey, into: &keys)
-                tryDecryptMetadata(payment: payment, destination: destination, keyUsed: encryptionKey)
-            } else if let hashZKType, destination.type == hashZKType {
-                let key = normalizedHash(destinationValue)
-                do {
-                    destination.value = try aes.decrypt(encryptedValue: destination.value, secret: key)
-                    destination.isEncrypted = false
-                    putIfAbsent(zkID: destination.zkID, key: key, into: &keys)
-                    tryDecryptMetadata(payment: payment, destination: destination, keyUsed: key)
-                } catch {
-                    continue
-                }
+            guard destination.isEncrypted, destination.type == .bitcoinAddress else { continue }
+            if encryptionKey.isEmpty { continue }
+            let decrypted: String
+            do {
+                decrypted = try aes.decrypt(encryptedValue: destination.value, secret: encryptionKey)
+            } catch {
+                continue
             }
+            if !expectedOnChainAddress.isEmpty && !addressesMatch(decrypted, expectedOnChainAddress) {
+                throw LookupFailure.tampered
+            }
+            if !expectedOnChainAddress.isEmpty { onChainBound = true }
+            destination.value = decrypted
+            destination.isEncrypted = false
+            putIfAbsent(id: destination.id, key: encryptionKey, into: &keys)
+            tryDecryptMetadata(payment: payment, destination: destination, keyUsed: encryptionKey)
         }
         return onChainBound
     }
 
     @discardableResult
-    private func decryptHashZKDestinations(payment: Payment, plainValue: String, keys: inout [(String, String)]) -> Bool {
-        guard let hashType = hashZKType(of: plainValue) else { return false }
+    private func decryptDerivedKeyDestinations(
+        payment: Payment,
+        plainValue: String,
+        keys: inout [(String, String)]
+    ) throws -> Bool {
+        guard let derived = derivedKeyType(of: plainValue) else { return false }
         let key = normalizedHash(plainValue)
         var bound = false
         for destination in payment.destinations {
-            guard destination.isZk, destination.type == hashType else { continue }
+            guard destination.isEncrypted, destination.type == derived else { continue }
+            let plaintext: String
             do {
-                destination.value = try aes.decrypt(encryptedValue: destination.value, secret: key)
-                destination.isEncrypted = false
-                putIfAbsent(zkID: destination.zkID, key: key, into: &keys)
-                tryDecryptMetadata(payment: payment, destination: destination, keyUsed: key)
-                bound = true
+                plaintext = try aes.decrypt(encryptedValue: destination.value, secret: key)
             } catch {
                 continue
             }
+            if plaintext.lowercased() != plainValue.lowercased() {
+                throw LookupFailure.tampered
+            }
+            destination.value = plaintext
+            destination.isEncrypted = false
+            putIfAbsent(id: destination.id, key: key, into: &keys)
+            tryDecryptMetadata(payment: payment, destination: destination, keyUsed: key)
+            bound = true
         }
         return bound
     }
@@ -288,22 +289,86 @@ public final class BrantaService {
             let dek = try aes.decrypt(encryptedValue: encryptedDek, secret: keyUsed)
             payment.metadata = try aes.decrypt(encryptedValue: payment.metadata ?? "", secret: dek)
             payment.isMetadataDecrypted = true
+            liftDescriptionFromMetadata(payment)
         } catch {
             return
         }
     }
 
-    private func putIfAbsent(zkID: String?, key: String, into keys: inout [(String, String)]) {
-        guard let zkID, !keys.contains(where: { $0.0 == zkID }) else { return }
-        keys.append((zkID, key))
+    private func putIfAbsent(id: String?, key: String, into keys: inout [(String, String)]) {
+        guard let id, !id.isEmpty, !keys.contains(where: { $0.0 == id }) else { return }
+        keys.append((id, key))
     }
 
-    private func buildVerifyURL(options: BrantaClientOptions?, paymentLookup: String, keys: [(String, String)] = []) throws -> String {
-        let baseURL = try resolvedBaseURL(defaults: defaultOptions, override: options)
-        var url = "\(baseURL)/v2/verify/\(javaURLEncode(paymentLookup))"
-        if !keys.isEmpty {
-            url += urlFragment(for: keys)
-        }
-        return url
+    private func errorLookup(_ parser: QRParser) -> String {
+        if !parser.onChainEncryptionText.isEmpty { return parser.onChainEncryptionText }
+        return parser.destination ?? ""
     }
+
+    private func toVerifyResult(_ payments: [Payment], _ verifyURL: String) -> VerifyResult {
+        if payments.isEmpty {
+            return VerifyResult(status: .unknown, verifyURL: verifyURL)
+        }
+        return VerifyResult(status: .match, payments: payments, verifyURL: verifyURL)
+    }
+
+    private func buildVerifyURL(options: BrantaApiOptions?, paymentLookup: String, keys: [(String, String)] = []) -> String {
+        let baseURL = resolvedBaseURL(defaults: defaultOptions, override: options).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return "\(baseURL)/v2/verify/\(pathEscape(paymentLookup))" + urlFragment(for: keys)
+    }
+}
+
+private func copyPayment(_ payment: Payment) -> Payment {
+    Payment(
+        description: payment.description,
+        destinations: payment.destinations.map { destination in
+            Destination(
+                value: destination.value,
+                isPrimary: destination.isPrimary,
+                type: destination.type,
+                id: destination.id,
+                encryptedDek: destination.encryptedDek,
+                isEncrypted: destination.isEncrypted
+            )
+        },
+        createdAt: payment.createdAt,
+        ttl: payment.ttl,
+        metadata: payment.metadata,
+        platform: payment.platform,
+        platformLogoURL: payment.platformLogoURL,
+        platformLogoLightURL: payment.platformLogoLightURL,
+        parentPlatform: payment.parentPlatform,
+        childPlatform: payment.childPlatform,
+        isMetadataDecrypted: payment.isMetadataDecrypted
+    )
+}
+
+private func foldDescriptionIntoMetadata(_ payment: Payment) {
+    guard let description = payment.description, !description.isEmpty else { return }
+    var map: [String: Any] = [:]
+    if let metadata = payment.metadata, !metadata.isEmpty,
+       let data = metadata.data(using: .utf8),
+       let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        map = parsed
+    }
+    if map["description"] == nil {
+        map["description"] = description
+    }
+    guard JSONSerialization.isValidJSONObject(map),
+          let data = try? JSONSerialization.data(withJSONObject: map),
+          let encoded = String(data: data, encoding: .utf8) else {
+        return
+    }
+    payment.metadata = encoded
+    payment.description = nil
+}
+
+private func liftDescriptionFromMetadata(_ payment: Payment) {
+    guard let metadata = payment.metadata, !metadata.isEmpty,
+          let data = metadata.data(using: .utf8),
+          let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let description = parsed["description"] as? String else {
+        return
+    }
+    payment.description = description
 }

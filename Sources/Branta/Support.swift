@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-public enum BrantaServerBaseURL: String, Sendable, Equatable {
+public enum BrantaEnvironment: String, Sendable, Equatable {
     case staging = "https://staging.guardrail.branta.pro"
     case production = "https://guardrail.branta.pro"
     case localhost = "http://localhost:3000"
@@ -9,89 +9,75 @@ public enum BrantaServerBaseURL: String, Sendable, Equatable {
     public var url: String { rawValue }
 }
 
-public enum PrivacyMode: Sendable, Equatable {
-    case strict
-    case loose
-}
-
+/// A destination `addPayment` can encrypt.
 public enum DestinationType: String, Sendable, Equatable, Codable {
     case bitcoinAddress = "bitcoin_address"
     case bolt11 = "bolt11"
-    case bolt12 = "bolt12"
-    case lnURL = "ln_url"
-    case tetherAddress = "tether_address"
-    case lnAddress = "ln_address"
     case arkAddress = "ark_address"
     case silentPayment = "silent_payment"
-
-    /// Kotlin's enum name, used in the unsupported-ZK error so the message matches the other SDKs.
-    var kotlinName: String {
-        switch self {
-        case .bitcoinAddress: return "BitcoinAddress"
-        case .bolt11: return "Bolt11"
-        case .bolt12: return "Bolt12"
-        case .lnURL: return "LnUrl"
-        case .tetherAddress: return "TetherAddress"
-        case .lnAddress: return "LnAddress"
-        case .arkAddress: return "ArkAddress"
-        case .silentPayment: return "SilentPayment"
-        }
-    }
 }
 
-public struct BrantaClientOptions: Sendable, Equatable {
-    public var baseURL: BrantaServerBaseURL?
-    public var defaultAPIKey: String?
+public enum VerifyStatus: String, Sendable, Equatable {
+    case match
+    case unknown
+    case tampered
+    case incomplete
+}
+
+/// Service configuration, overridable per call.
+/// A nil `environment` means unset and uses staging. An empty per-call `apiKey` or `hmacSecret` does not override.
+public struct BrantaApiOptions: Sendable, Equatable {
+    public var environment: BrantaEnvironment?
+    public var apiKey: String?
     public var hmacSecret: String?
-    public var privacy: PrivacyMode?
 
     public init(
-        baseURL: BrantaServerBaseURL? = nil,
-        defaultAPIKey: String? = nil,
-        hmacSecret: String? = nil,
-        privacy: PrivacyMode? = nil
+        environment: BrantaEnvironment? = nil,
+        apiKey: String? = nil,
+        hmacSecret: String? = nil
     ) {
-        self.baseURL = baseURL
-        self.defaultAPIKey = defaultAPIKey
+        self.environment = environment
+        self.apiKey = apiKey
         self.hmacSecret = hmacSecret
-        self.privacy = privacy
     }
 }
 
 public struct BrantaPaymentError: Error, Equatable, CustomStringConvertible, LocalizedError {
-    public enum Reason: Equatable, Sendable {
-        case tampered
-    }
-
     public let message: String
-    public let reason: Reason?
 
-    public init(message: String, reason: Reason? = nil) {
+    public init(message: String) {
         self.message = message
-        self.reason = reason
     }
 
     public var description: String { message }
     public var errorDescription: String? { message }
 }
 
-func resolvedBaseURL(defaults: BrantaClientOptions?, override: BrantaClientOptions?) throws -> String {
-    if let url = override?.baseURL?.url ?? defaults?.baseURL?.url {
-        return url
+enum LookupFailure: Error, Equatable {
+    case tampered
+    case incomplete
+}
+
+func resolvedBaseURL(defaults: BrantaApiOptions?, override: BrantaApiOptions?) -> String {
+    if let environment = override?.environment {
+        return environment.url
     }
-    throw BrantaPaymentError(message: "Branta: baseUrl is a required option.")
+    if let environment = defaults?.environment {
+        return environment.url
+    }
+    return BrantaEnvironment.staging.url
 }
 
-func resolvedPrivacy(defaults: BrantaClientOptions?, override: BrantaClientOptions?) -> PrivacyMode {
-    override?.privacy ?? defaults?.privacy ?? .strict
+func resolvedAPIKey(defaults: BrantaApiOptions?, override: BrantaApiOptions?) -> String? {
+    if let key = override?.apiKey, !key.isEmpty { return key }
+    if let key = defaults?.apiKey, !key.isEmpty { return key }
+    return nil
 }
 
-func resolvedAPIKey(defaults: BrantaClientOptions?, override: BrantaClientOptions?) -> String? {
-    override?.defaultAPIKey ?? defaults?.defaultAPIKey
-}
-
-func resolvedHMACSecret(defaults: BrantaClientOptions?, override: BrantaClientOptions?) -> String? {
-    override?.hmacSecret ?? defaults?.hmacSecret
+func resolvedHMACSecret(defaults: BrantaApiOptions?, override: BrantaApiOptions?) -> String? {
+    if let secret = override?.hmacSecret, !secret.isEmpty { return secret }
+    if let secret = defaults?.hmacSecret, !secret.isEmpty { return secret }
+    return nil
 }
 
 func isBolt11(_ value: String) -> Bool {
@@ -109,7 +95,7 @@ func isSilentPayment(_ value: String) -> Bool {
     return lower.hasPrefix("sp1") || lower.hasPrefix("tsp1")
 }
 
-func hashZKType(of value: String) -> DestinationType? {
+func derivedKeyType(of value: String) -> DestinationType? {
     if isBolt11(value) { return .bolt11 }
     if isArk(value) { return .arkAddress }
     if isSilentPayment(value) { return .silentPayment }
@@ -122,7 +108,8 @@ func normalizedHash(_ value: String) -> String {
 }
 
 func urlFragment(for keys: [(String, String)]) -> String {
-    "#" + keys.map { "k-\($0.0)=\($0.1)" }.joined(separator: "&")
+    if keys.isEmpty { return "" }
+    return "#" + keys.map { "k-\(fragmentEscape($0.0))=\(fragmentEscape($0.1))" }.joined(separator: "&")
 }
 
 func addressesMatch(_ a: String, _ b: String) -> Bool {
@@ -136,43 +123,35 @@ func addressesMatch(_ a: String, _ b: String) -> Bool {
     return a == b
 }
 
-/// Java `URLEncoder.encode` / `URLDecoder.decode` (UTF-8). The other SDKs use this for payment paths and verify URLs.
-func javaURLEncode(_ value: String) -> String {
-    var out = ""
-    for byte in value.utf8 {
-        let allowed = (byte >= 0x30 && byte <= 0x39)
-            || (byte >= 0x41 && byte <= 0x5A)
-            || (byte >= 0x61 && byte <= 0x7A)
-            || byte == 0x2D || byte == 0x5F || byte == 0x2E || byte == 0x2A
-        if byte == 0x20 {
-            out.append("+")
-        } else if allowed {
-            out.append(Character(UnicodeScalar(byte)))
-        } else {
-            out.append(String(format: "%%%02X", byte))
-        }
-    }
-    return out
+/// Percent-encodes everything except unreserved characters, matching .NET `Uri.EscapeDataString`.
+/// This encodes `+`, `/`, and `=`, which appear in base64 ciphertext lookup values.
+func pathEscape(_ value: String) -> String {
+    percentEncode(value, safe: isPathUnreserved)
 }
 
-func javaURLDecode(_ value: String) -> String {
-    let replaced = value.replacingOccurrences(of: "+", with: " ")
-    var bytes: [UInt8] = []
-    var index = replaced.startIndex
-    while index < replaced.endIndex {
-        if replaced[index] == "%",
-           let first = replaced.index(index, offsetBy: 1, limitedBy: replaced.endIndex),
-           let second = replaced.index(index, offsetBy: 2, limitedBy: replaced.endIndex),
-           second < replaced.endIndex,
-           let byte = UInt8(replaced[first...second], radix: 16) {
-            bytes.append(byte)
-            index = replaced.index(after: second)
+/// Percent-encodes with the `encodeURIComponent` set: everything except
+/// ALPHA / DIGIT / "-" / "_" / "." / "!" / "~" / "*" / "'" / "(" / ")".
+func fragmentEscape(_ value: String) -> String {
+    percentEncode(value, safe: isFragmentSafe)
+}
+
+func pathUnescape(_ value: String) -> String {
+    var out: [UInt8] = []
+    let bytes = Array(value.utf8)
+    var index = 0
+    while index < bytes.count {
+        if bytes[index] == UInt8(ascii: "%") {
+            if index + 2 >= bytes.count { return value }
+            let hex = String(bytes: [bytes[index + 1], bytes[index + 2]], encoding: .ascii) ?? ""
+            guard let byte = UInt8(hex, radix: 16) else { return value }
+            out.append(byte)
+            index += 3
         } else {
-            bytes.append(contentsOf: String(replaced[index]).utf8)
-            index = replaced.index(after: index)
+            out.append(bytes[index])
+            index += 1
         }
     }
-    return String(bytes: bytes, encoding: .utf8) ?? replaced
+    return String(bytes: out, encoding: .utf8) ?? value
 }
 
 func hmacSHA256Hex(secret: String, message: String) -> String {
@@ -189,7 +168,50 @@ func origin(of urlString: String) -> String? {
         return nil
     }
     if let port = components.port {
-        return "\(scheme)://\(host):\(port)"
+        return "\(scheme)://\(host):\(port)".lowercased()
     }
-    return "\(scheme)://\(host)"
+    return "\(scheme)://\(host)".lowercased()
+}
+
+private func percentEncode(_ value: String, safe: (UInt8) -> Bool) -> String {
+    var out = ""
+    for byte in value.utf8 {
+        if safe(byte) {
+            out.append(Character(UnicodeScalar(byte)))
+        } else {
+            out.append(String(format: "%%%02X", byte))
+        }
+    }
+    return out
+}
+
+private func isPathUnreserved(_ byte: UInt8) -> Bool {
+    if isASCIIAlphanumeric(byte) { return true }
+    switch byte {
+    case UInt8(ascii: "-"), UInt8(ascii: "_"), UInt8(ascii: "."), UInt8(ascii: "~"):
+        return true
+    default:
+        return false
+    }
+}
+
+private func isFragmentSafe(_ byte: UInt8) -> Bool {
+    if isASCIIAlphanumeric(byte) { return true }
+    switch byte {
+    case UInt8(ascii: "-"), UInt8(ascii: "_"), UInt8(ascii: "."),
+         UInt8(ascii: "!"), UInt8(ascii: "~"), UInt8(ascii: "*"),
+         UInt8(ascii: "'"), UInt8(ascii: "("), UInt8(ascii: ")"):
+        return true
+    default:
+        return false
+    }
+}
+
+func isASCIIAlpha(_ byte: UInt8) -> Bool {
+    (byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z"))
+        || (byte >= UInt8(ascii: "a") && byte <= UInt8(ascii: "z"))
+}
+
+func isASCIIAlphanumeric(_ byte: UInt8) -> Bool {
+    isASCIIAlpha(byte) || (byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9"))
 }

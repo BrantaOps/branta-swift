@@ -15,44 +15,44 @@ public struct Platform: Equatable, Sendable {
 public final class Destination {
     public var value: String
     public var isPrimary: Bool
-    public var isZk: Bool
-    public var type: DestinationType?
-    public var zkID: String?
-    public var encryptedDek: String?
-    /// Client-side only. True while a ZK destination has not been decrypted.
+    /// Client-side only. True when a GET row has `zk` true and still needs decrypt.
     public var isEncrypted: Bool
+    public var type: DestinationType?
+    /// Serializes as `zk_id`. `addPayment` assigns one when this is empty.
+    public var id: String?
+    public var encryptedDek: String?
 
     public init(
         value: String,
         isPrimary: Bool = false,
-        isZk: Bool = false,
         type: DestinationType? = nil,
-        zkID: String? = nil,
+        id: String? = nil,
         encryptedDek: String? = nil,
         isEncrypted: Bool = false
     ) {
         self.value = value
         self.isPrimary = isPrimary
-        self.isZk = isZk
         self.type = type
-        self.zkID = zkID
+        self.id = id
         self.encryptedDek = encryptedDek
         self.isEncrypted = isEncrypted
     }
 }
 
 public final class Payment {
+    /// Not a plaintext API field. `addPayment` folds this into encrypted metadata, and `verify` lifts it back after decrypt.
     public var description: String?
     public var destinations: [Destination]
     public var createdAt: String?
+    /// Seconds. Zero is unset and is left off the POST so Guardrail applies its default.
     public var ttl: Int
     public var metadata: String?
     public var platform: String?
     public var platformLogoURL: String?
     public var platformLogoLightURL: String?
+    /// Deserialize-only. The server sets this; a POST never sends it.
     public var parentPlatform: Platform?
     public var childPlatform: Platform?
-    public var btcPayServerPluginVersion: String?
     /// Client-side only. True after metadata was decrypted with a destination DEK.
     public var isMetadataDecrypted: Bool
 
@@ -67,7 +67,6 @@ public final class Payment {
         platformLogoLightURL: String? = nil,
         parentPlatform: Platform? = nil,
         childPlatform: Platform? = nil,
-        btcPayServerPluginVersion: String? = nil,
         isMetadataDecrypted: Bool = false
     ) {
         self.description = description
@@ -80,23 +79,17 @@ public final class Payment {
         self.platformLogoLightURL = platformLogoLightURL
         self.parentPlatform = parentPlatform
         self.childPlatform = childPlatform
-        self.btcPayServerPluginVersion = btcPayServerPluginVersion
         self.isMetadataDecrypted = isMetadataDecrypted
-    }
-
-    public func defaultValue() throws -> String {
-        guard let value = destinations.first?.value else {
-            throw BrantaPaymentError(message: "No destinations found")
-        }
-        return value
     }
 }
 
-public struct PaymentsResult {
+public struct VerifyResult {
+    public var status: VerifyStatus
     public var payments: [Payment]
     public var verifyURL: String
 
-    public init(payments: [Payment] = [], verifyURL: String = "") {
+    public init(status: VerifyStatus, payments: [Payment] = [], verifyURL: String) {
+        self.status = status
         self.payments = payments
         self.verifyURL = verifyURL
     }
@@ -120,7 +113,9 @@ enum WireCoding {
     }
 
     static func decodePayments(_ data: Data) throws -> [Payment] {
+        if data.isEmpty { return [] }
         let object = try JSONSerialization.jsonObject(with: data)
+        if object is NSNull { return [] }
         guard let array = object as? [Any] else {
             throw BrantaPaymentError(message: "Expected a payment array")
         }
@@ -128,7 +123,7 @@ enum WireCoding {
             guard let object = item as? [String: Any] else {
                 throw BrantaPaymentError(message: "Expected a payment object")
             }
-            return payment(from: object)
+            return try payment(from: object)
         }
     }
 
@@ -137,24 +132,20 @@ enum WireCoding {
         guard let dictionary = object as? [String: Any] else {
             throw BrantaPaymentError(message: "Expected a payment object")
         }
-        return payment(from: dictionary)
+        return try payment(from: dictionary)
     }
 
     private static func paymentObject(_ payment: Payment) -> [String: Any] {
         var object: [String: Any] = [
             "destinations": payment.destinations.map(destinationObject),
-            "ttl": payment.ttl,
         ]
-        if let description = payment.description { object["description"] = description }
+        if payment.ttl != 0 { object["ttl"] = payment.ttl }
         if let createdAt = payment.createdAt { object["created_at"] = createdAt }
         if let metadata = payment.metadata { object["metadata"] = metadata }
         if let platform = payment.platform { object["platform"] = platform }
         if let logo = payment.platformLogoURL { object["platform_logo_url"] = logo }
         if let logo = payment.platformLogoLightURL { object["platform_logo_light_url"] = logo }
         if let child = payment.childPlatform { object["child_platform"] = platformObject(child) }
-        if let version = payment.btcPayServerPluginVersion {
-            object["btc_pay_server_plugin_version"] = version
-        }
         return object
     }
 
@@ -162,10 +153,10 @@ enum WireCoding {
         var object: [String: Any] = [
             "value": destination.value,
             "primary": destination.isPrimary,
-            "zk": destination.isZk,
+            "zk": true,
         ]
         if let type = destination.type { object["type"] = type.rawValue }
-        if let zkID = destination.zkID { object["zk_id"] = zkID }
+        if let id = destination.id, !id.isEmpty { object["zk_id"] = id }
         if let dek = destination.encryptedDek { object["encrypted_dek"] = dek }
         return object
     }
@@ -178,9 +169,20 @@ enum WireCoding {
         return object
     }
 
-    private static func payment(from object: [String: Any]) -> Payment {
-        let destinations = (object["destinations"] as? [Any] ?? []).compactMap { item -> Destination? in
-            guard let dictionary = item as? [String: Any] else { return nil }
+    private static func payment(from object: [String: Any]) throws -> Payment {
+        let rawDestinations = object["destinations"]
+        let destinationItems: [Any]
+        if rawDestinations == nil || rawDestinations is NSNull {
+            destinationItems = []
+        } else if let array = rawDestinations as? [Any] {
+            destinationItems = array
+        } else {
+            throw BrantaPaymentError(message: "Expected a destinations array")
+        }
+        let destinations = try destinationItems.map { item -> Destination in
+            guard let dictionary = item as? [String: Any] else {
+                throw BrantaPaymentError(message: "Expected a destination object")
+            }
             return destination(from: dictionary)
         }
         return Payment(
@@ -193,9 +195,7 @@ enum WireCoding {
             platformLogoURL: object["platform_logo_url"] as? String,
             platformLogoLightURL: object["platform_logo_light_url"] as? String,
             parentPlatform: platform(from: object["parent_platform"]),
-            childPlatform: platform(from: object["child_platform"]),
-            btcPayServerPluginVersion: object["btc_pay_server_plugin_version"] as? String
-                ?? object["btcpay_server_plugin_version"] as? String
+            childPlatform: platform(from: object["child_platform"])
         )
     }
 
@@ -204,10 +204,10 @@ enum WireCoding {
         return Destination(
             value: object["value"] as? String ?? "",
             isPrimary: boolValue(object["primary"]),
-            isZk: boolValue(object["zk"]),
             type: type,
-            zkID: object["zk_id"] as? String ?? object["zkId"] as? String,
-            encryptedDek: object["encrypted_dek"] as? String
+            id: object["zk_id"] as? String ?? object["zkId"] as? String,
+            encryptedDek: object["encrypted_dek"] as? String,
+            isEncrypted: boolValue(object["zk"])
         )
     }
 
@@ -221,12 +221,14 @@ enum WireCoding {
     }
 
     private static func boolValue(_ value: Any?) -> Bool {
+        if value is NSNull { return false }
         if let bool = value as? Bool { return bool }
         if let number = value as? NSNumber { return number.boolValue }
         return false
     }
 
     private static func intValue(_ value: Any?) -> Int? {
+        if value is NSNull { return nil }
         if let int = value as? Int { return int }
         if let number = value as? NSNumber { return number.intValue }
         return nil
