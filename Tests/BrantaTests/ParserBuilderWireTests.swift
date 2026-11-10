@@ -70,8 +70,8 @@ final class QRParserTests: XCTestCase {
 
     func testLnoAndPayAreUnverifiable() {
         let lno = QRParser("bitcoin:bc1qmerchant?lno=lno1qqexample")
-        XCTAssertEqual(lno.destinations[1].value, "lno1qqexample")
-        XCTAssertNil(lno.destinations[1].type)
+        XCTAssertEqual(lno.destinations.count, 1)
+        XCTAssertEqual(lno.destinations[0].value, "bc1qmerchant")
         XCTAssertTrue(lno.hasUnverifiableInstruction)
 
         let pay = QRParser("bitcoin:bc1qmerchant?pay=bitcoin:bc1qother")
@@ -118,6 +118,29 @@ final class QRParserTests: XCTestCase {
         let tabbed = QRParser("bitcoin:1attac\tkeraddr?branta_id=ID1&branta_secret=SEC1")
         XCTAssertEqual(tabbed.destination, "1attackeraddr")
         XCTAssertEqual(QRParser("lightnin\tg:lnbc100n1ptest").destinationType, .bolt11)
+    }
+
+    func testPolUriIsSecretKeyWithoutTokenType() {
+        let parser = QRParser("pol:0x278297528c32eCa01295B0d2135984d3442ec963?value=50&branta_id=enc&branta_secret=sec")
+        XCTAssertEqual(parser.destination, "0x278297528c32eCa01295B0d2135984d3442ec963")
+        XCTAssertNil(parser.destinationType)
+        XCTAssertTrue(parser.destinations[0].secretKey)
+        XCTAssertEqual(parser.onChainEncryptionText, "enc")
+        XCTAssertEqual(parser.onChainEncryptionSecret, "sec")
+        XCTAssertEqual(parser.expectedSecretKeyTypes, [.usdtPolygon, .usdcPolygon])
+    }
+
+    func testBitcoinUriExpectsBitcoinSecretKeyFamily() {
+        let parser = QRParser("bitcoin:bc1qmerchant?branta_id=enc&branta_secret=sec")
+        XCTAssertTrue(parser.destinations[0].secretKey)
+        XCTAssertEqual(parser.expectedSecretKeyTypes, [.bitcoinAddress])
+    }
+
+    func testPolygonEvmHelpers() {
+        XCTAssertEqual(polygonEvmDestinationTypes, [.usdtPolygon, .usdcPolygon])
+        XCTAssertTrue(isPolygonEvmDestinationType(.usdtPolygon))
+        XCTAssertTrue(isSecretKeyAddressType(.bitcoinAddress))
+        XCTAssertFalse(isSecretKeyAddressType(.bolt11))
     }
 
     func testOnChainZKRequiresBothParams() {

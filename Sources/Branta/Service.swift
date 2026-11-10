@@ -79,7 +79,7 @@ public final class BrantaService {
                 }
             }
 
-            if destType == .bitcoinAddress {
+            if let destType, isSecretKeyAddressType(destType) {
                 let ciphertext = try aes.encrypt(
                     value: submitted.destinations[index].value,
                     secret: secret,
@@ -150,6 +150,7 @@ public final class BrantaService {
                 encryptionKey: parser.onChainEncryptionSecret,
                 additionalHashValues: additional,
                 expectedOnChainAddress: expectedOnChain ?? "",
+                expectedOnChainTypes: Set(parser.expectedSecretKeyTypes),
                 options: options
             )
             return toVerifyResult(payments, verifyURL)
@@ -169,6 +170,7 @@ public final class BrantaService {
         encryptionKey: String,
         additionalHashValues: [String],
         expectedOnChainAddress: String,
+        expectedOnChainTypes: Set<DestinationType>,
         options: BrantaApiOptions?
     ) async throws -> ([Payment], String) {
         var payments = try await client.getPayments(destinationValue: lookupValue, options: options)
@@ -179,7 +181,8 @@ public final class BrantaService {
                 payment: &payments[index],
                 encryptionKey: encryptionKey,
                 keys: &keys,
-                expectedOnChainAddress: expectedOnChainAddress
+                expectedOnChainAddress: expectedOnChainAddress,
+                expectedOnChainTypes: expectedOnChainTypes
             )
             var hashesBound = true
             for value in additionalHashValues {
@@ -212,7 +215,7 @@ public final class BrantaService {
     private func uniformOnChainAddress(_ parser: QRParser) throws -> String? {
         var first: String?
         for destination in parser.destinations {
-            guard destination.type == .bitcoinAddress else { continue }
+            guard destination.secretKey else { continue }
             if destination.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
             if first == nil {
                 first = destination.value
@@ -230,12 +233,17 @@ public final class BrantaService {
         payment: inout Payment,
         encryptionKey: String,
         keys: inout [(String, String)],
-        expectedOnChainAddress: String
+        expectedOnChainAddress: String,
+        expectedOnChainTypes: Set<DestinationType>
     ) throws -> Bool {
         var onChainBound = expectedOnChainAddress.isEmpty
+        var decryptedExpectedRail = false
         for index in payment.destinations.indices {
             let destination = payment.destinations[index]
-            guard destination.isEncrypted, destination.type == .bitcoinAddress else { continue }
+            guard destination.isEncrypted else { continue }
+            guard let type = destination.type, isSecretKeyAddressType(type) else { continue }
+            // Outside this QR's rail family (e.g. bitcoin when scanning pol:) — leave encrypted.
+            if !expectedOnChainTypes.isEmpty && !expectedOnChainTypes.contains(type) { continue }
             if encryptionKey.isEmpty { continue }
             let decrypted: String
             do {
@@ -243,14 +251,20 @@ public final class BrantaService {
             } catch {
                 continue
             }
+            decryptedExpectedRail = true
+            // Match-if-any within the family: a sibling rail with a different address stays encrypted.
             if !expectedOnChainAddress.isEmpty && !addressesMatch(decrypted, expectedOnChainAddress) {
-                throw LookupFailure.tampered
+                continue
             }
             if !expectedOnChainAddress.isEmpty { onChainBound = true }
             payment.destinations[index].value = decrypted
             payment.destinations[index].isEncrypted = false
             putIfAbsent(id: destination.id, key: encryptionKey, into: &keys)
             tryDecryptMetadata(payment: &payment, index: index, keyUsed: encryptionKey)
+        }
+        // Tampered only when a family rail decrypted and none matched the scanned address.
+        if !expectedOnChainAddress.isEmpty && !onChainBound && decryptedExpectedRail {
+            throw LookupFailure.tampered
         }
         return onChainBound
     }
@@ -307,11 +321,20 @@ public final class BrantaService {
         return parser.destination ?? ""
     }
 
+    private func matchedDestinationsFrom(_ payments: [Payment]) -> [Destination] {
+        payments.flatMap { $0.destinations.filter { !$0.isEncrypted } }
+    }
+
     private func toVerifyResult(_ payments: [Payment], _ verifyURL: String) -> VerifyResult {
         if payments.isEmpty {
             return VerifyResult(status: .unknown, verifyURL: verifyURL)
         }
-        return VerifyResult(status: .match, payments: payments, verifyURL: verifyURL)
+        return VerifyResult(
+            status: .match,
+            payments: payments,
+            matchedDestinations: matchedDestinationsFrom(payments),
+            verifyURL: verifyURL
+        )
     }
 
     private func buildVerifyURL(options: BrantaApiOptions?, paymentLookup: String, keys: [(String, String)] = []) -> String {

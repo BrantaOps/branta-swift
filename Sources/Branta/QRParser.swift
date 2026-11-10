@@ -2,13 +2,19 @@ import Foundation
 
 struct QRDestination {
     var value: String
+    /// Known rail type when the scheme or payload names one (e.g. bitcoin). Not set for `pol:`.
     var type: DestinationType?
+    /// Visible address that participates in the secret-key swap check.
+    var secretKey: Bool = false
 }
 
 struct QRParser {
     var destinations: [QRDestination] = []
     var onChainEncryptionText = ""
     var onChainEncryptionSecret = ""
+    /// Destination types `verify` may bind for this QR's scheme (match-if-any).
+    /// Set from the URI scheme — not from a token stamped on the address.
+    var expectedSecretKeyTypes: [DestinationType] = []
     /// A payable instruction this SDK cannot bind to a decrypted destination.
     var hasUnverifiableInstruction = false
 
@@ -23,6 +29,16 @@ struct QRParser {
         }
 
         let schemeLower = scheme.lowercased()
+        if schemeLower == "pol" {
+            let destValue = extractDestination(text)
+            destinations.append(QRDestination(value: destValue, type: nil, secretKey: true))
+            expectedSecretKeyTypes = polygonEvmDestinationTypes
+            let query = parseQuery(extractQuery(text))
+            onChainEncryptionText = query["branta_id"] ?? ""
+            onChainEncryptionSecret = query["branta_secret"] ?? ""
+            return
+        }
+
         guard schemeLower == "bitcoin" || schemeLower == "lightning" else {
             destinations.append(QRDestination(value: text, type: nil))
             return
@@ -30,7 +46,11 @@ struct QRParser {
 
         let destValue = extractDestination(text)
         let destType: DestinationType? = schemeLower == "bitcoin" ? .bitcoinAddress : lightningSchemeType(destValue)
-        destinations.append(QRDestination(value: destValue, type: destType))
+        destinations.append(QRDestination(
+            value: destValue,
+            type: destType,
+            secretKey: destType == .bitcoinAddress
+        ))
         if !destValue.isEmpty && destType != .bitcoinAddress && derivedKeyType(of: destValue) == nil {
             hasUnverifiableInstruction = true
         }
@@ -39,15 +59,23 @@ struct QRParser {
         onChainEncryptionText = query["branta_id"] ?? ""
         onChainEncryptionSecret = query["branta_secret"] ?? ""
         addBindable(query, key: "lightning", onChain: false)
-        addBindable(query, key: "bolt12", onChain: false)
         addBindable(query, key: "ark", onChain: false)
         addBindable(query, key: "silent_payment", onChain: false)
         addBindable(query, key: "bc", onChain: true)
         addBindable(query, key: "tb", onChain: true)
         addBindable(query, key: "sp", onChain: false)
-        addBindable(query, key: "lno", onChain: false)
+        if let bolt12 = query["bolt12"], !bolt12.isEmpty {
+            hasUnverifiableInstruction = true
+        }
+        if let lno = query["lno"], !lno.isEmpty {
+            hasUnverifiableInstruction = true
+        }
         if let pay = query["pay"], !pay.isEmpty {
             hasUnverifiableInstruction = true
+        }
+
+        if destinations.contains(where: { $0.secretKey }) {
+            expectedSecretKeyTypes = [.bitcoinAddress]
         }
     }
 
@@ -58,10 +86,11 @@ struct QRParser {
     private mutating func addBindable(_ query: [String: String], key: String, onChain: Bool) {
         guard let value = query[key] else { return }
         let type: DestinationType? = onChain ? .bitcoinAddress : detectPlainTextType(value)
-        destinations.append(QRDestination(value: value, type: type))
         if !value.isEmpty && !onChain && derivedKeyType(of: value) == nil {
             hasUnverifiableInstruction = true
+            return
         }
+        destinations.append(QRDestination(value: value, type: type, secretKey: onChain))
     }
 }
 

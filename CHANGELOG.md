@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] - 2026-11-10
+
+### Added
+- `DestinationType.usdtPolygon` for Polygon USDT. `addPayment` encrypts the recipient with a random secret (same pattern as bitcoin). `verify` parses `pol:` URIs with `branta_id` / `branta_secret`; other query params (`value`, `currency`, `user`) are ignored for binding. A bare `0x` address is `unknown`. EVM address compare is case-insensitive.
+- `DestinationType.usdcPolygon` for Polygon USDC. Same secret-key encrypt / `pol:` verify path as `usdt_polygon`. Token is the destination type on the payment; `pol:` remains the Polygon EVM scheme for both.
+- `polygonEvmDestinationTypes`, `isPolygonEvmDestinationType`, and `isSecretKeyAddressType`.
+- `VerifyResult.matchedDestinations` on `match` — decrypted rails that bound the scan (token for `pol:` is on `type`).
+
+### Changed
+- `verify` of a `pol:` URI binds any Polygon EVM family member whose decrypted address matches (match-if-any).
+- `pol:` parsing no longer stamps a token `DestinationType` on the QR address. The scheme maps to the Polygon EVM family for verify; the token still comes from the matched payment destination.
+- `verify` swap-checks only the secret-key rail family that matches the QR scheme, so a payment with both bitcoin and `usdt_polygon` no longer returns `tampered` for a valid single-rail QR.
+- This release matches `@branta-ops/branta` / Branta.NET / branta-go 4.2.0.
+
 ## [4.0.0] - 2026-11-02
 
 ### Removed

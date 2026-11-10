@@ -15,6 +15,21 @@ public enum DestinationType: String, Sendable, Equatable, Codable {
     case bolt11 = "bolt11"
     case arkAddress = "ark_address"
     case silentPayment = "silent_payment"
+    case usdtPolygon = "usdt_polygon"
+    case usdcPolygon = "usdc_polygon"
+}
+
+/// Polygon EVM secret-key rails. A `pol:` URI maps to this family for verify
+/// (match-if-any). Token is still the destination type on the payment.
+public let polygonEvmDestinationTypes: [DestinationType] = [.usdtPolygon, .usdcPolygon]
+
+public func isPolygonEvmDestinationType(_ type: DestinationType) -> Bool {
+    type == .usdtPolygon || type == .usdcPolygon
+}
+
+/// Address rails encrypted with a random `branta_secret` (not a derived key).
+public func isSecretKeyAddressType(_ type: DestinationType) -> Bool {
+    type == .bitcoinAddress || isPolygonEvmDestinationType(type)
 }
 
 public enum VerifyStatus: String, Sendable, Equatable {
@@ -118,6 +133,9 @@ func addressesMatch(_ a: String, _ b: String) -> Bool {
         return lower.hasPrefix("bc1") || lower.hasPrefix("tb1") || lower.hasPrefix("bcrt1")
     }
     if isBech32(a) && isBech32(b) {
+        return a.lowercased() == b.lowercased()
+    }
+    if a.hasPrefix("0x") && b.hasPrefix("0x") {
         return a.lowercased() == b.lowercased()
     }
     return a == b
