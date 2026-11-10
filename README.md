@@ -15,14 +15,14 @@ Swift Package Manager, in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/BrantaOps/branta-swift.git", from: "4.0.0"),
+    .package(url: "https://github.com/BrantaOps/branta-swift.git", from: "4.2.0"),
 ],
 targets: [
     .target(name: "YourApp", dependencies: ["Branta"]),
 ]
 ```
 
-Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 4.0.0.
+Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 4.2.0.
 
 ## Send
 
@@ -94,8 +94,8 @@ BRANTA_RUN_INTEGRATION=1 swift test --filter IntegrationTests
 ## Publishing
 
 1. Add a changelog entry and bump the version in the Installation section.
-2. Tag the release `v4.0.0` (the `v` prefix). Swift Package Manager resolves `from: "4.0.0"` from that tag.
-3. Push the tag: `git push origin v4.0.0`
+2. Tag the release `v4.2.0` (the `v` prefix). Swift Package Manager resolves `from: "4.2.0"` from that tag.
+3. Push the tag: `git push origin v4.2.0`
 
 ## Responsible Disclosure
 
