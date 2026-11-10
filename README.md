@@ -38,6 +38,8 @@ let result = try await service.verify(input) // scanned QR or pasted text
 switch result.status {
 case .match:
     // Show the card for result.payments[0]. Link it to result.verifyURL.
+    // For pol: rails, token is on result.matchedDestinations[i].type
+    // (.usdtPolygon / .usdcPolygon) — do not infer it from pol:.
 case .unknown:
     // Not in Branta. Show nothing.
 case .tampered:
@@ -49,7 +51,7 @@ case .incomplete:
 
 A logo on the wrong origin throws. Do not treat that as `unknown`.
 
-On-chain Bitcoin needs a `bitcoin:` URI with `branta_id` and `branta_secret`. bolt11, Ark, and silent payments resolve from the value. A bare address, including testnet `tb1` and `bcrt1`, is `unknown`.
+On-chain Bitcoin needs a `bitcoin:` URI with `branta_id` and `branta_secret`. Polygon EVM rails (`usdt_polygon`, `usdc_polygon`) need a `pol:` URI with the same params — token is on `matchedDestinations[].type`, not the `pol:` scheme. bolt11, Ark, and silent payments resolve from the value. A bare address (including bare `0x`) is `unknown`.
 
 A 404 is `unknown`. A 5xx, a 429, or no network is `incomplete`.
 
@@ -64,6 +66,8 @@ let service = BrantaService(options: BrantaApiOptions(
 let payment = PaymentBuilder()
     .setDescription("Invoice #12345")
     .addDestination("bc1q…", type: .bitcoinAddress)
+    // Polygon: pass .usdtPolygon / .usdcPolygon explicitly — bare 0x is not auto-detected.
+    // .addDestination("0x…", type: .usdtPolygon)
     .setTTL(600)
     .build()
 
@@ -72,13 +76,13 @@ let added = try await service.addPayment(payment)
 
 `addPayment` encrypts a copy. The `Payment` you pass in stays plaintext, so a failed post can be retried with the same value.
 
-Store `added.secret` with the invoice. Put `branta_id` and `branta_secret` on the invoice QR. `added.verifyURL` is the link for the wallet.
+Store `added.secret` with the invoice. Put `branta_id` and `branta_secret` on the invoice QR (`bitcoin:…` or `pol:…`). `added.verifyURL` is the link for the wallet.
 
 A parent platform with one shared key sets `apiKey` on the service and calls `setChildPlatform(name:logoURL:logoLightURL:)` for each payment. That is the path for new parent platforms. The deprecated per-client HMAC path is in the developer docs.
 
 ## Destination types
 
-`addPayment` accepts `bitcoinAddress`, `bolt11`, `arkAddress`, and `silentPayment`. Bitcoin addresses use the secret `addPayment` returns. bolt11, Ark, and silent payments use a key derived from the lowercased value, so the same input always produces the same lookup token.
+`addPayment` accepts `bitcoinAddress`, `bolt11`, `arkAddress`, `silentPayment`, `usdtPolygon`, and `usdcPolygon`. Bitcoin and Polygon addresses use the secret `addPayment` returns. bolt11, Ark, and silent payments use a key derived from the lowercased value, so the same input always produces the same lookup token. Pass Polygon types explicitly — a bare `0x` address is not auto-detected.
 
 ## Development
 

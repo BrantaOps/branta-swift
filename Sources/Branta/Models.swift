@@ -86,11 +86,19 @@ public struct Payment: Sendable {
 public struct VerifyResult {
     public var status: VerifyStatus
     public var payments: [Payment]
+    /// Decrypted rails that bound the scan on `match` (token for `pol:` is on `type`).
+    public var matchedDestinations: [Destination]
     public var verifyURL: String
 
-    public init(status: VerifyStatus, payments: [Payment] = [], verifyURL: String) {
+    public init(
+        status: VerifyStatus,
+        payments: [Payment] = [],
+        matchedDestinations: [Destination] = [],
+        verifyURL: String
+    ) {
         self.status = status
         self.payments = payments
+        self.matchedDestinations = matchedDestinations
         self.verifyURL = verifyURL
     }
 }
