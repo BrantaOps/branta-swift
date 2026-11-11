@@ -433,6 +433,14 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(result.status, .match)
     }
 
+    func testPolUsdt0xPrefixCaseInsensitiveMatch() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon)])] }
+        aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
+        let mixed = "0X" + String(usdtPolygonAddr.dropFirst(2))
+        let result = try await service.verify(polURI(mixed, encrypted: "enc-usdt", secret: "the-secret"))
+        XCTAssertEqual(result.status, .match)
+    }
+
     func testPolUsdtSwappedIsTampered() async throws {
         client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon)])] }
         aes.decryptImpl = { _, _ in self.usdtPolygonAddr }

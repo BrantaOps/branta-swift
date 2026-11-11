@@ -135,7 +135,7 @@ func addressesMatch(_ a: String, _ b: String) -> Bool {
     if isBech32(a) && isBech32(b) {
         return a.lowercased() == b.lowercased()
     }
-    if a.hasPrefix("0x") && b.hasPrefix("0x") {
+    if a.lowercased().hasPrefix("0x") && b.lowercased().hasPrefix("0x") {
         return a.lowercased() == b.lowercased()
     }
     return a == b
