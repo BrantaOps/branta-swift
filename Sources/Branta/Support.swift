@@ -23,7 +23,6 @@ public enum DestinationType: String, Sendable, Equatable, Codable {
     case usdcBsc = "usdc_bsc"
     case usdtTron = "usdt_tron"
     case usdtTon = "usdt_ton"
-    case usdcTon = "usdc_ton"
     case usdtSolana = "usdt_solana"
     case usdcSolana = "usdc_solana"
 }
@@ -34,7 +33,7 @@ public let polygonEvmDestinationTypes: [DestinationType] = [.usdtPolygon, .usdcP
 public let ethereumEvmDestinationTypes: [DestinationType] = [.usdtEthereum, .usdcEthereum]
 public let bscEvmDestinationTypes: [DestinationType] = [.usdtBsc, .usdcBsc]
 public let tronDestinationTypes: [DestinationType] = [.usdtTron]
-public let tonDestinationTypes: [DestinationType] = [.usdtTon, .usdcTon]
+public let tonDestinationTypes: [DestinationType] = [.usdtTon]
 public let solanaDestinationTypes: [DestinationType] = [.usdtSolana, .usdcSolana]
 
 /// URI scheme -> secret-key destination family for verify (match-if-any).

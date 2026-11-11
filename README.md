@@ -51,7 +51,7 @@ case .incomplete:
 
 A logo on the wrong origin throws. Do not treat that as `unknown`.
 
-On-chain Bitcoin needs a `bitcoin:` URI with `branta_id` and `branta_secret`. Stablecoin rails need a chain URI with the same params — `pol:` (`usdt_polygon`, `usdc_polygon`), `eth:` (`usdt_ethereum`, `usdc_ethereum`), `bsc:` (`usdt_bsc`, `usdc_bsc`), `tron:` (`usdt_tron`), `ton:` (`usdt_ton`, `usdc_ton`), `sol:` (`usdt_solana`, `usdc_solana`). Token is on `matchedDestinations[].type`, not the URI scheme; verify is match-if-any within the scheme's family. bolt11, Ark, and silent payments resolve from the value. A bare address (including bare `0x`) is `unknown`.
+On-chain Bitcoin needs a `bitcoin:` URI with `branta_id` and `branta_secret`. Stablecoin rails need a chain URI with the same params — `pol:` (`usdt_polygon`, `usdc_polygon`), `eth:` (`usdt_ethereum`, `usdc_ethereum`), `bsc:` (`usdt_bsc`, `usdc_bsc`), `tron:` (`usdt_tron`), `ton:` (`usdt_ton`), `sol:` (`usdt_solana`, `usdc_solana`). Token is on `matchedDestinations[].type`, not the URI scheme; verify is match-if-any within the scheme's family. bolt11, Ark, and silent payments resolve from the value. A bare address (including bare `0x`) is `unknown`.
 
 A 404 is `unknown`. A 5xx, a 429, or no network is `incomplete`.
 
@@ -82,7 +82,7 @@ A parent platform with one shared key sets `apiKey` on the service and calls `se
 
 ## Destination types
 
-`addPayment` accepts `bitcoinAddress`, `bolt11`, `arkAddress`, `silentPayment`, `usdtPolygon`, `usdcPolygon`, `usdtEthereum`, `usdcEthereum`, `usdtBsc`, `usdcBsc`, `usdtTron`, `usdtTon`, `usdcTon`, `usdtSolana`, and `usdcSolana`. Bitcoin and stablecoin addresses use the secret `addPayment` returns. bolt11, Ark, and silent payments use a key derived from the lowercased value, so the same input always produces the same lookup token. Pass Polygon types explicitly — a bare `0x` address is not auto-detected.
+`addPayment` accepts `bitcoinAddress`, `bolt11`, `arkAddress`, `silentPayment`, `usdtPolygon`, `usdcPolygon`, `usdtEthereum`, `usdcEthereum`, `usdtBsc`, `usdcBsc`, `usdtTron`, `usdtTon`, `usdtSolana`, and `usdcSolana`. Bitcoin and stablecoin addresses use the secret `addPayment` returns. bolt11, Ark, and silent payments use a key derived from the lowercased value, so the same input always produces the same lookup token. Pass Polygon types explicitly — a bare `0x` address is not auto-detected.
 
 ## Development
 
