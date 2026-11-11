@@ -29,10 +29,10 @@ struct QRParser {
         }
 
         let schemeLower = scheme.lowercased()
-        if schemeLower == "pol" {
+        if let secretKeyFamily = secretKeyURIFamilies[schemeLower] {
             let destValue = extractDestination(text)
             destinations.append(QRDestination(value: destValue, type: nil, secretKey: true))
-            expectedSecretKeyTypes = polygonEvmDestinationTypes
+            expectedSecretKeyTypes = secretKeyFamily
             let query = parseQuery(extractQuery(text))
             onChainEncryptionText = query["branta_id"] ?? ""
             onChainEncryptionSecret = query["branta_secret"] ?? ""

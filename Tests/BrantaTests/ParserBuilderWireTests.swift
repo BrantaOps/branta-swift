@@ -130,6 +130,41 @@ final class QRParserTests: XCTestCase {
         XCTAssertEqual(parser.expectedSecretKeyTypes, [.usdtPolygon, .usdcPolygon])
     }
 
+    func testChainUriSchemesMapToTheirDestinationFamily() {
+        let cases: [(String, [DestinationType])] = [
+            ("eth", ethereumEvmDestinationTypes),
+            ("bsc", bscEvmDestinationTypes),
+            ("tron", tronDestinationTypes),
+            ("ton", tonDestinationTypes),
+            ("sol", solanaDestinationTypes),
+        ]
+        for (scheme, family) in cases {
+            let parser = QRParser("\(scheme):someaddress?value=1&branta_id=enc&branta_secret=sec")
+            XCTAssertEqual(parser.destination, "someaddress", scheme)
+            XCTAssertNil(parser.destinationType, scheme)
+            XCTAssertTrue(parser.destinations[0].secretKey, scheme)
+            XCTAssertEqual(parser.expectedSecretKeyTypes, family, scheme)
+            XCTAssertEqual(parser.onChainEncryptionText, "enc", scheme)
+            XCTAssertEqual(parser.onChainEncryptionSecret, "sec", scheme)
+        }
+        XCTAssertEqual(ethereumEvmDestinationTypes, [.usdtEthereum, .usdcEthereum])
+        XCTAssertEqual(tronDestinationTypes, [.usdtTron])
+        XCTAssertEqual(Set(secretKeyURIFamilies.keys), ["pol", "eth", "bsc", "tron", "ton", "sol"])
+    }
+
+    func testIsSecretKeyAddressTypeCoversBitcoinAndEveryStableFamilyMember() {
+        XCTAssertTrue(isSecretKeyAddressType(.bitcoinAddress))
+        for family in secretKeyURIFamilies.values {
+            for type in family {
+                XCTAssertTrue(isSecretKeyAddressType(type), type.rawValue)
+            }
+        }
+        XCTAssertFalse(isSecretKeyAddressType(.arkAddress))
+        XCTAssertFalse(isSecretKeyAddressType(.silentPayment))
+        XCTAssertEqual(DestinationType(rawValue: "usdt_tron"), .usdtTron)
+        XCTAssertEqual(DestinationType(rawValue: "usdc_solana"), .usdcSolana)
+    }
+
     func testBitcoinUriExpectsBitcoinSecretKeyFamily() {
         let parser = QRParser("bitcoin:bc1qmerchant?branta_id=enc&branta_secret=sec")
         XCTAssertTrue(parser.destinations[0].secretKey)
