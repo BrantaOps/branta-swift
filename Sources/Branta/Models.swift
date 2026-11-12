@@ -86,7 +86,7 @@ public struct Payment: Sendable {
 public struct VerifyResult {
     public var status: VerifyStatus
     public var payments: [Payment]
-    /// Decrypted rails that bound the scan on `match` (token for `pol:` is on `type`).
+    /// Decrypted rails that bound the scan on `match` (token is on `type`, not the URI scheme).
     public var matchedDestinations: [Destination]
     public var verifyURL: String
 

@@ -163,18 +163,15 @@ final class QRParserTests: XCTestCase {
         XCTAssertFalse(isSecretKeyAddressType(.silentPayment))
         XCTAssertEqual(DestinationType(rawValue: "usdt_tron"), .usdtTron)
         XCTAssertEqual(DestinationType(rawValue: "usdc_solana"), .usdcSolana)
+        XCTAssertNil(DestinationType(rawValue: "usdc_ton"))
+        XCTAssertEqual(polygonEvmDestinationTypes, [.usdtPolygon, .usdcPolygon])
+        XCTAssertFalse(isSecretKeyAddressType(.bolt11))
     }
 
     func testBitcoinUriExpectsBitcoinSecretKeyFamily() {
         let parser = QRParser("bitcoin:bc1qmerchant?branta_id=enc&branta_secret=sec")
         XCTAssertTrue(parser.destinations[0].secretKey)
         XCTAssertEqual(parser.expectedSecretKeyTypes, [.bitcoinAddress])
-    }
-
-    func testPolygonEvmHelpers() {
-        XCTAssertEqual(polygonEvmDestinationTypes, [.usdtPolygon, .usdcPolygon])
-        XCTAssertTrue(isSecretKeyAddressType(.bitcoinAddress))
-        XCTAssertFalse(isSecretKeyAddressType(.bolt11))
     }
 
     func testOnChainZKRequiresBothParams() {

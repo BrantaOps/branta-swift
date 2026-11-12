@@ -242,7 +242,7 @@ public final class BrantaService {
             let destination = payment.destinations[index]
             guard destination.isEncrypted else { continue }
             guard let type = destination.type, isSecretKeyAddressType(type) else { continue }
-            // Outside this QR's rail family (e.g. bitcoin when scanning pol:) — leave encrypted.
+            // Outside this QR's rail family (e.g. bitcoin when scanning eth:) — leave encrypted.
             if !expectedOnChainTypes.isEmpty && !expectedOnChainTypes.contains(type) { continue }
             if encryptionKey.isEmpty { continue }
             let decrypted: String
