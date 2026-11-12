@@ -2,7 +2,7 @@ import Foundation
 
 struct QRDestination {
     var value: String
-    /// Known rail type when the scheme or payload names one (e.g. bitcoin). Not set for `pol:`.
+    /// Known rail type when the scheme or payload names one (e.g. bitcoin). Not set for chain URI schemes (`pol:`, `eth:`, …).
     var type: DestinationType?
     /// Visible address that participates in the secret-key swap check.
     var secretKey: Bool = false
@@ -29,10 +29,10 @@ struct QRParser {
         }
 
         let schemeLower = scheme.lowercased()
-        if schemeLower == "pol" {
+        if let secretKeyFamily = secretKeyURIFamilies[schemeLower] {
             let destValue = extractDestination(text)
             destinations.append(QRDestination(value: destValue, type: nil, secretKey: true))
-            expectedSecretKeyTypes = polygonEvmDestinationTypes
+            expectedSecretKeyTypes = secretKeyFamily
             let query = parseQuery(extractQuery(text))
             onChainEncryptionText = query["branta_id"] ?? ""
             onChainEncryptionSecret = query["branta_secret"] ?? ""

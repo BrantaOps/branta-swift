@@ -17,19 +17,38 @@ public enum DestinationType: String, Sendable, Equatable, Codable {
     case silentPayment = "silent_payment"
     case usdtPolygon = "usdt_polygon"
     case usdcPolygon = "usdc_polygon"
+    case usdtEthereum = "usdt_ethereum"
+    case usdcEthereum = "usdc_ethereum"
+    case usdtBsc = "usdt_bsc"
+    case usdcBsc = "usdc_bsc"
+    case usdtTron = "usdt_tron"
+    case usdtTon = "usdt_ton"
+    case usdtSolana = "usdt_solana"
+    case usdcSolana = "usdc_solana"
 }
 
 /// Polygon EVM secret-key rails. A `pol:` URI maps to this family for verify
 /// (match-if-any). Token is still the destination type on the payment.
-public let polygonEvmDestinationTypes: [DestinationType] = [.usdtPolygon, .usdcPolygon]
+let polygonEvmDestinationTypes: [DestinationType] = [.usdtPolygon, .usdcPolygon]
+let ethereumEvmDestinationTypes: [DestinationType] = [.usdtEthereum, .usdcEthereum]
+let bscEvmDestinationTypes: [DestinationType] = [.usdtBsc, .usdcBsc]
+let tronDestinationTypes: [DestinationType] = [.usdtTron]
+let tonDestinationTypes: [DestinationType] = [.usdtTon]
+let solanaDestinationTypes: [DestinationType] = [.usdtSolana, .usdcSolana]
 
-public func isPolygonEvmDestinationType(_ type: DestinationType) -> Bool {
-    type == .usdtPolygon || type == .usdcPolygon
-}
+/// URI scheme -> secret-key destination family for verify (match-if-any).
+let secretKeyURIFamilies: [String: [DestinationType]] = [
+    "pol": polygonEvmDestinationTypes,
+    "eth": ethereumEvmDestinationTypes,
+    "bsc": bscEvmDestinationTypes,
+    "tron": tronDestinationTypes,
+    "ton": tonDestinationTypes,
+    "sol": solanaDestinationTypes,
+]
 
 /// Address rails encrypted with a random `branta_secret` (not a derived key).
-public func isSecretKeyAddressType(_ type: DestinationType) -> Bool {
-    type == .bitcoinAddress || isPolygonEvmDestinationType(type)
+func isSecretKeyAddressType(_ type: DestinationType) -> Bool {
+    type == .bitcoinAddress || secretKeyURIFamilies.values.contains { $0.contains(type) }
 }
 
 public enum VerifyStatus: String, Sendable, Equatable {
