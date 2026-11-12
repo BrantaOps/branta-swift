@@ -98,15 +98,19 @@ final class ClientTests: XCTestCase {
         }
     }
 
-    func testMalformedJSONThrows() async {
+    func testMalformedJSONIsIncomplete() async {
         do {
             _ = try await client(json: "{").0.getPayments(destinationValue: "value", options: nil)
-            XCTFail("expected throw")
-        } catch is BrantaPaymentError {
-            XCTFail("malformed JSON is not a payment error status")
+            XCTFail("expected incomplete")
+        } catch LookupFailure.incomplete {
         } catch {
-            XCTAssertFalse(error is LookupFailure)
+            XCTFail("unexpected \(error)")
         }
+    }
+
+    func testNonArrayBodyIsEmptyList() async throws {
+        let payments = try await client(json: #"{"not":"an-array"}"#).0.getPayments(destinationValue: "value", options: nil)
+        XCTAssertTrue(payments.isEmpty)
     }
 
     func testPathEncodesPlusSlashEqualsAndSendsMetricsToken() async throws {
@@ -135,10 +139,9 @@ final class ClientTests: XCTestCase {
 
     func testHMACSignsTheRawBody() async throws {
         let transport = StubTransport(body: "null", statusCode: 200)
-        let client = BrantaClient(
-            defaultOptions: BrantaApiOptions(environment: .localhost, apiKey: "key", hmacSecret: "test-secret"),
-            transport: transport
-        )
+        var options = BrantaApiOptions(environment: .localhost, apiKey: "key")
+        options._hmacSecret = "test-secret"
+        let client = BrantaClient(defaultOptions: options, transport: transport)
         client.timestamp = { "1700000000" }
         let payment = Payment(destinations: [Destination(value: "abc")], ttl: 0)
         _ = try await client.postPayment(payment, options: nil)

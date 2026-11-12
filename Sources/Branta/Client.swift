@@ -9,9 +9,24 @@ protocol HTTPTransporting {
     func send(_ request: URLRequest) async throws -> HTTPResult
 }
 
+/// `URLSession` transport with a finite request/resource timeout so hung networks
+/// surface as transport errors (mapped to `incomplete` on GET).
 struct URLSessionTransport: HTTPTransporting {
+    let session: URLSession
+    let timeout: TimeInterval
+
+    init(timeout: TimeInterval = 30) {
+        self.timeout = timeout
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = timeout
+        config.timeoutIntervalForResource = timeout
+        self.session = URLSession(configuration: config)
+    }
+
     func send(_ request: URLRequest) async throws -> HTTPResult {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        var request = request
+        request.timeoutInterval = timeout
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw BrantaPaymentError(message: "Invalid response")
         }
@@ -57,7 +72,13 @@ final class BrantaClient: BrantaClienting {
         guard (200..<300).contains(response.statusCode) else {
             throw LookupFailure.incomplete
         }
-        let payments = try WireCoding.decodePayments(response.body)
+        let payments: [Payment]
+        do {
+            payments = try WireCoding.decodePayments(response.body)
+        } catch {
+            // Malformed JSON or a bad row shape — treat as unfinished lookup, not a crash.
+            throw LookupFailure.incomplete
+        }
         try verifyLogoURLs(baseURL: baseURL, payments: payments)
         return payments
     }

@@ -38,8 +38,8 @@ public final class BrantaService {
     /// Parses a scanned QR or pasted text and looks it up.
     ///
     /// A swapped address or a derived-key plaintext that is not the scanned value is `tampered`.
-    /// A 404 is `unknown`. Any other non-OK response, and a network failure, is `incomplete`.
-    /// A logo URL on the wrong origin still throws.
+    /// A 404 is `unknown`. Any other non-OK response, a network/timeout failure, or a malformed
+    /// GET body is `incomplete`. A logo URL on the wrong origin still throws.
     public func verify(_ input: String, options: BrantaApiOptions? = nil) async throws -> VerifyResult {
         let parser = QRParser(input)
         let lookup = errorLookup(parser)
