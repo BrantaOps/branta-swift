@@ -173,7 +173,6 @@ final class QRParserTests: XCTestCase {
 
     func testPolygonEvmHelpers() {
         XCTAssertEqual(polygonEvmDestinationTypes, [.usdtPolygon, .usdcPolygon])
-        XCTAssertTrue(isPolygonEvmDestinationType(.usdtPolygon))
         XCTAssertTrue(isSecretKeyAddressType(.bitcoinAddress))
         XCTAssertFalse(isSecretKeyAddressType(.bolt11))
     }

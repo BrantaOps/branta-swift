@@ -8,7 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Multi-rail stablecoin destination types `usdtEthereum`, `usdcEthereum`, `usdtBsc`, `usdcBsc`, `usdtTron`, `usdtTon`, `usdtSolana`, `usdcSolana`. `addPayment` encrypts them with a random secret. `verify` parses `eth:`, `bsc:`, `tron:`, `ton:`, and `sol:` URIs with `branta_id` / `branta_secret` (`secretKeyURIFamilies`), match-if-any within the scheme's family. A bare address is `unknown`.
+- Multi-rail stablecoin destination types `usdtEthereum`, `usdcEthereum`, `usdtBsc`, `usdcBsc`, `usdtTron`, `usdtTon`, `usdtSolana`, `usdcSolana`. `addPayment` encrypts them with a random secret. `verify` parses `eth:`, `bsc:`, `tron:`, `ton:`, and `sol:` URIs with `branta_id` / `branta_secret`, match-if-any within the scheme's family. A bare address is `unknown`. Token is on `matchedDestinations[].type`, not the URI scheme.
+
+### Changed
+- Family lists / `secretKeyURIFamilies` / `isSecretKeyAddressType` are package-internal (match JS/Python/Dart consumer surface).
+
+### Removed
+- `isPolygonEvmDestinationType` (superseded by `secretKeyURIFamilies` / `isSecretKeyAddressType`).
 
 ## [4.2.0] - 2026-11-10
 

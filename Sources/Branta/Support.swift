@@ -29,15 +29,15 @@ public enum DestinationType: String, Sendable, Equatable, Codable {
 
 /// Polygon EVM secret-key rails. A `pol:` URI maps to this family for verify
 /// (match-if-any). Token is still the destination type on the payment.
-public let polygonEvmDestinationTypes: [DestinationType] = [.usdtPolygon, .usdcPolygon]
-public let ethereumEvmDestinationTypes: [DestinationType] = [.usdtEthereum, .usdcEthereum]
-public let bscEvmDestinationTypes: [DestinationType] = [.usdtBsc, .usdcBsc]
-public let tronDestinationTypes: [DestinationType] = [.usdtTron]
-public let tonDestinationTypes: [DestinationType] = [.usdtTon]
-public let solanaDestinationTypes: [DestinationType] = [.usdtSolana, .usdcSolana]
+let polygonEvmDestinationTypes: [DestinationType] = [.usdtPolygon, .usdcPolygon]
+let ethereumEvmDestinationTypes: [DestinationType] = [.usdtEthereum, .usdcEthereum]
+let bscEvmDestinationTypes: [DestinationType] = [.usdtBsc, .usdcBsc]
+let tronDestinationTypes: [DestinationType] = [.usdtTron]
+let tonDestinationTypes: [DestinationType] = [.usdtTon]
+let solanaDestinationTypes: [DestinationType] = [.usdtSolana, .usdcSolana]
 
 /// URI scheme -> secret-key destination family for verify (match-if-any).
-public let secretKeyURIFamilies: [String: [DestinationType]] = [
+let secretKeyURIFamilies: [String: [DestinationType]] = [
     "pol": polygonEvmDestinationTypes,
     "eth": ethereumEvmDestinationTypes,
     "bsc": bscEvmDestinationTypes,
@@ -46,12 +46,8 @@ public let secretKeyURIFamilies: [String: [DestinationType]] = [
     "sol": solanaDestinationTypes,
 ]
 
-public func isPolygonEvmDestinationType(_ type: DestinationType) -> Bool {
-    polygonEvmDestinationTypes.contains(type)
-}
-
 /// Address rails encrypted with a random `branta_secret` (not a derived key).
-public func isSecretKeyAddressType(_ type: DestinationType) -> Bool {
+func isSecretKeyAddressType(_ type: DestinationType) -> Bool {
     type == .bitcoinAddress || secretKeyURIFamilies.values.contains { $0.contains(type) }
 }
 
