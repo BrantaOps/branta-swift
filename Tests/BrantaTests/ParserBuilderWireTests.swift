@@ -284,8 +284,10 @@ final class WireFormatTests: XCTestCase {
 
     func testUnsetEnvironmentUsesStagingAndEmptyKeyDoesNotOverride() {
         XCTAssertEqual(resolvedBaseURL(defaults: BrantaApiOptions(), override: nil), BrantaEnvironment.staging.url)
-        let defaults = BrantaApiOptions(environment: .production, apiKey: "parent", hmacSecret: "parent-secret")
-        let override = BrantaApiOptions(apiKey: "", hmacSecret: "")
+        var defaults = BrantaApiOptions(environment: .production, apiKey: "parent")
+        defaults._hmacSecret = "parent-secret"
+        var override = BrantaApiOptions(apiKey: "")
+        override._hmacSecret = ""
         XCTAssertEqual(resolvedAPIKey(defaults: defaults, override: override), "parent")
         XCTAssertEqual(resolvedHMACSecret(defaults: defaults, override: override), "parent-secret")
         XCTAssertEqual(resolvedBaseURL(defaults: defaults, override: override), BrantaEnvironment.production.url)

@@ -9,5 +9,26 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test
-        run: swift test
+      - name: Test with coverage
+        run: |
+          set -euo pipefail
+          swift test --enable-code-coverage
+          BIN=$(find .build -path '*BrantaPackageTests.xctest/Contents/MacOS/BrantaPackageTests' | head -1)
+          PROF=$(find .build -name 'default.profdata' | head -1)
+          if [ -z "$BIN" ] || [ -z "$PROF" ]; then
+            echo "Could not locate coverage binary or profile"
+            exit 1
+          fi
+          xcrun llvm-cov report "$BIN" \
+            -instr-profile="$PROF" \
+            -ignore-filename-regex='\.build|Tests' \
+            Sources/Branta | tee coverage-report.txt
+          # Gate: Sources/Branta line coverage must stay at or above 80%.
+          # Last numeric % on TOTAL is line cover (branch cover may be `-`).
+          PCT=$(awk '/^TOTAL/ {
+            for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+%$/) cover = $i
+            gsub(/%/, "", cover)
+            print cover
+          }' coverage-report.txt)
+          echo "Sources/Branta line coverage: ${PCT}%"
+          awk -v pct="$PCT" 'BEGIN { exit (pct+0 < 80) ? 1 : 0 }'

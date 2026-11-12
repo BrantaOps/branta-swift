@@ -190,6 +190,15 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(result.verifyURL, "http://localhost:3000/v2/verify/\(invoice)")
     }
 
+    func testMalformedLookupIsIncomplete() async throws {
+        // Client maps decode failures to LookupFailure.incomplete; verify must surface status, not throw.
+        client.getImpl = { _, _ in throw LookupFailure.incomplete }
+        let result = try await service.verify(invoice)
+        XCTAssertEqual(result.status, .incomplete)
+        XCTAssertTrue(result.payments.isEmpty)
+        XCTAssertTrue(result.matchedDestinations.isEmpty)
+    }
+
     func testLogoMismatchStillErrors() async {
         client.getImpl = { _, _ in throw BrantaPaymentError(message: "platformLogoURL domain does not match the configured environment") }
         do {

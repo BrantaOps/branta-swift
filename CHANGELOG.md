@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Breaking for 4.2.0 callers:** family lists / `secretKeyURIFamilies` / `isSecretKeyAddressType` are package-internal (match JS/Python/Dart consumer surface).
+- Malformed GET JSON / bad payment rows map to `incomplete` (not a thrown decode error). Non-array 200 bodies decode as an empty list.
+- HTTP uses a 30s request/resource timeout so hung networks become `incomplete` on verify.
+- Split `Support.swift` into `DestinationTypes`, `Options`, `Encoding`, and `WireCoding`.
+- `hmacSecret` on `BrantaApiOptions` is deprecated; prefer a shared `apiKey` with `setChildPlatform`.
 
 ### Removed
 - **Breaking for 4.2.0 callers:** `isPolygonEvmDestinationType` (superseded by `secretKeyURIFamilies` / `isSecretKeyAddressType`).
