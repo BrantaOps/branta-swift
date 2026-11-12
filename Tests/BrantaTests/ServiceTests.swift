@@ -649,8 +649,95 @@ final class ServiceTests: XCTestCase {
         try await assertChainMatch("eth", address: usdtEthereumAddr, type: .usdtEthereum)
     }
 
+    func testEthUsdtCaseInsensitiveMatch() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-chain", id: "zk-chain", type: .usdtEthereum)])] }
+        aes.decryptImpl = { _, _ in self.usdtEthereumAddr }
+        let result = try await service.verify(
+            chainURI("eth", usdtEthereumAddr.lowercased(), encrypted: "enc-chain", secret: "the-secret")
+        )
+        XCTAssertEqual(result.status, .match)
+    }
+
+    func testEthUsdt0xPrefixCaseInsensitiveMatch() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-chain", id: "zk-chain", type: .usdtEthereum)])] }
+        aes.decryptImpl = { _, _ in self.usdtEthereumAddr }
+        let mixed = "0X" + String(usdtEthereumAddr.dropFirst(2))
+        let result = try await service.verify(
+            chainURI("eth", mixed, encrypted: "enc-chain", secret: "the-secret")
+        )
+        XCTAssertEqual(result.status, .match)
+    }
+
+    func testEthIgnoresSiblingBitcoinRail() async throws {
+        client.getImpl = { _, _ in
+            [Payment(destinations: [
+                self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
+                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtEthereum),
+            ])]
+        }
+        aes.decryptImpl = { value, _ in
+            value == "cipher-usdt" ? self.usdtEthereumAddr : self.addr
+        }
+        let result = try await service.verify(
+            chainURI("eth", usdtEthereumAddr, encrypted: "enc-usdt", secret: "the-secret")
+        )
+        XCTAssertEqual(result.status, .match)
+        XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
+        XCTAssertEqual(result.matchedDestinations[0].type, .usdtEthereum)
+    }
+
+    func testEthSwappedStillTamperedWhenSiblingBitcoinPresent() async throws {
+        client.getImpl = { _, _ in
+            [Payment(destinations: [
+                self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
+                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtEthereum),
+            ])]
+        }
+        aes.decryptImpl = { value, _ in
+            value == "cipher-usdt" ? self.usdtEthereumAddr : self.addr
+        }
+        let result = try await service.verify(
+            chainURI("eth", swappedEvmAddr, encrypted: "enc-usdt", secret: "the-secret")
+        )
+        XCTAssertEqual(result.status, .tampered)
+    }
+
     func testBscUsdtMatch() async throws {
         try await assertChainMatch("bsc", address: usdtBscAddr, type: .usdtBsc)
+    }
+
+    func testBscIgnoresSiblingBitcoinRail() async throws {
+        client.getImpl = { _, _ in
+            [Payment(destinations: [
+                self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
+                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtBsc),
+            ])]
+        }
+        aes.decryptImpl = { value, _ in
+            value == "cipher-usdt" ? self.usdtBscAddr : self.addr
+        }
+        let result = try await service.verify(
+            chainURI("bsc", usdtBscAddr, encrypted: "enc-usdt", secret: "the-secret")
+        )
+        XCTAssertEqual(result.status, .match)
+        XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
+        XCTAssertEqual(result.matchedDestinations[0].type, .usdtBsc)
+    }
+
+    func testBscSwappedStillTamperedWhenSiblingBitcoinPresent() async throws {
+        client.getImpl = { _, _ in
+            [Payment(destinations: [
+                self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
+                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtBsc),
+            ])]
+        }
+        aes.decryptImpl = { value, _ in
+            value == "cipher-usdt" ? self.usdtBscAddr : self.addr
+        }
+        let result = try await service.verify(
+            chainURI("bsc", swappedEvmAddr, encrypted: "enc-usdt", secret: "the-secret")
+        )
+        XCTAssertEqual(result.status, .tampered)
     }
 
     func testTronUsdtMatch() async throws {
@@ -779,46 +866,32 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(result.status, .tampered)
     }
 
-    func testAddPaymentEncryptsUsdtTronWithSecret() async throws {
-        service = BrantaService(
-            options: BrantaApiOptions(environment: .localhost),
-            client: client,
-            aes: aes,
-            secretGenerator: FakeSecrets(["tron-secret"])
-        )
-        let payment = Payment(destinations: [Destination(value: usdtTronAddr, type: .usdtTron, id: "zk-1")])
-        let added = try await service.addPayment(payment)
-        XCTAssertEqual(payment.destinations[0].value, usdtTronAddr)
-        XCTAssertNotEqual(client.posts[0].destinations[0].value, usdtTronAddr)
-        XCTAssertEqual(client.posts[0].destinations[0].type, .usdtTron)
-        XCTAssertEqual(added.secret, "tron-secret")
-    }
-
-    func testAddPaymentEncryptsUsdtPolygon() async throws {
-        service = BrantaService(
-            options: BrantaApiOptions(environment: .localhost),
-            client: client,
-            aes: aes,
-            secretGenerator: FakeSecrets(["polygon-secret"])
-        )
-        let payment = Payment(destinations: [Destination(value: usdtPolygonAddr, type: .usdtPolygon, id: "zk-1")])
-        let added = try await service.addPayment(payment)
-        XCTAssertEqual(payment.destinations[0].value, usdtPolygonAddr)
-        XCTAssertNotEqual(client.posts[0].destinations[0].value, usdtPolygonAddr)
-        XCTAssertEqual(client.posts[0].destinations[0].type, .usdtPolygon)
-        XCTAssertEqual(added.secret, "polygon-secret")
-    }
-
-    func testAddPaymentEncryptsUsdcPolygon() async throws {
-        service = BrantaService(
-            options: BrantaApiOptions(environment: .localhost),
-            client: client,
-            aes: aes,
-            secretGenerator: FakeSecrets(["polygon-secret"])
-        )
-        let payment = Payment(destinations: [Destination(value: usdcPolygonAddr, type: .usdcPolygon, id: "zk-1")])
-        _ = try await service.addPayment(payment)
-        XCTAssertEqual(client.posts[0].destinations[0].type, .usdcPolygon)
+    func testAddPaymentEncryptsSecretKeyRailsWithGeneratedSecret() async throws {
+        let rails: [(String, DestinationType)] = [
+            (usdtPolygonAddr, .usdtPolygon),
+            (usdcPolygonAddr, .usdcPolygon),
+            (usdtEthereumAddr, .usdtEthereum),
+            (usdtBscAddr, .usdtBsc),
+            (usdtTronAddr, .usdtTron),
+            (usdtTonAddr, .usdtTon),
+            (usdtSolanaAddr, .usdtSolana),
+            (usdcSolanaAddr, .usdcSolana),
+        ]
+        for (address, type) in rails {
+            client.posts.removeAll()
+            service = BrantaService(
+                options: BrantaApiOptions(environment: .localhost),
+                client: client,
+                aes: aes,
+                secretGenerator: FakeSecrets(["rail-secret"])
+            )
+            let payment = Payment(destinations: [Destination(value: address, type: type, id: "zk-1")])
+            let added = try await service.addPayment(payment)
+            XCTAssertEqual(payment.destinations[0].value, address, type.rawValue)
+            XCTAssertNotEqual(client.posts[0].destinations[0].value, address, type.rawValue)
+            XCTAssertEqual(client.posts[0].destinations[0].type, type, type.rawValue)
+            XCTAssertEqual(added.secret, "rail-secret", type.rawValue)
+        }
     }
 
     func testAddPaymentBareOxWithoutTypeUnsupported() async {

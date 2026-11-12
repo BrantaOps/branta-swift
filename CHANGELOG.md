@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.3.0] - 2026-11-12
 
 ### Added
 - Multi-rail stablecoin destination types `usdtEthereum`, `usdcEthereum`, `usdtBsc`, `usdcBsc`, `usdtTron`, `usdtTon`, `usdtSolana`, `usdcSolana`. `addPayment` encrypts them with a random secret. `verify` parses `eth:`, `bsc:`, `tron:`, `ton:`, and `sol:` URIs with `branta_id` / `branta_secret`, match-if-any within the scheme's family. A bare address is `unknown`. Token is on `matchedDestinations[].type`, not the URI scheme.
@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking for 4.2.0 callers:** `isPolygonEvmDestinationType` (superseded by `secretKeyURIFamilies` / `isSecretKeyAddressType`).
 
 ### Notes
-- `usdc_ton` is deferred until a platform names a concrete TON USDC jetton.
+- `usdc_ton` is deferred until a platform names a concrete TON USDC jetton. Matches `@branta-ops/branta` / `branta` Python / Dart 4.3.0.
 
 ## [4.2.0] - 2026-11-10
 
