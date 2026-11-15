@@ -2,6 +2,8 @@ import XCTest
 @testable import Branta
 
 final class QRParserTests: XCTestCase {
+    private let bitcoinAddress = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+
     func testPlainBitcoin() {
         let parser = QRParser("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
         XCTAssertEqual(parser.destination, "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
@@ -120,55 +122,240 @@ final class QRParserTests: XCTestCase {
         XCTAssertEqual(QRParser("lightnin\tg:lnbc100n1ptest").destinationType, .bolt11)
     }
 
-    func testPolUriIsSecretKeyWithoutTokenType() {
-        let parser = QRParser("pol:0x278297528c32eCa01295B0d2135984d3442ec963?value=50&branta_id=enc&branta_secret=sec")
-        XCTAssertEqual(parser.destination, "0x278297528c32eCa01295B0d2135984d3442ec963")
-        XCTAssertNil(parser.destinationType)
+    private let baseUSDCContract = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    private let deposit = "0x1111111111111111111111111111111111111111"
+
+    func testERC681TransferBindsTheDepositAndOneToken() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@8453/transfer?address=\(deposit)&uint256=1000000&branta_id=abc%2Bdef%3D&branta_secret=1234"
+        )
+        XCTAssertEqual(parser.destination, deposit)
+        XCTAssertEqual(parser.destinationType, .usdcBase)
+        XCTAssertEqual(parser.destinations.count, 1)
         XCTAssertTrue(parser.destinations[0].secretKey)
-        XCTAssertEqual(parser.onChainEncryptionText, "enc")
-        XCTAssertEqual(parser.onChainEncryptionSecret, "sec")
-        XCTAssertEqual(parser.expectedSecretKeyTypes, [.usdtPolygon, .usdcPolygon])
+        XCTAssertEqual(parser.expectedSecretKeyTypes, [.usdcBase])
+        XCTAssertEqual(parser.onChainEncryptionText, "abc+def=")
+        XCTAssertEqual(parser.onChainEncryptionSecret, "1234")
     }
 
-    func testChainUriSchemesMapToTheirDestinationFamily() {
-        let cases: [(String, [DestinationType])] = [
-            ("eth", ethereumEvmDestinationTypes),
-            ("bsc", bscEvmDestinationTypes),
-            ("tron", tronDestinationTypes),
-            ("ton", tonDestinationTypes),
-            ("sol", solanaDestinationTypes),
+    func testEveryRailBindsTheDepositAndOneType() {
+        for rail in evmTokenRails {
+            let parser = QRParser(
+                "ethereum:\(rail.contract)@\(rail.chainID)/transfer?address=\(deposit)&branta_id=a&branta_secret=b"
+            )
+            XCTAssertEqual(parser.destination, deposit, rail.type.rawValue)
+            XCTAssertEqual(parser.destinationType, rail.type, rail.type.rawValue)
+            XCTAssertEqual(parser.expectedSecretKeyTypes, [rail.type], rail.type.rawValue)
+        }
+    }
+
+    func testERC681ContractMatchesCaseInsensitively() {
+        let parser = QRParser("ethereum:\(baseUSDCContract.lowercased())@8453/transfer?address=\(deposit)")
+        XCTAssertEqual(parser.destinationType, .usdcBase)
+    }
+
+    func testERC681Uint256IsNotPartOfTheBinding() {
+        for amount in ["1", "50000000", "999999999999999999999"] {
+            let parser = QRParser("ethereum:\(baseUSDCContract)@8453/transfer?address=\(deposit)&uint256=\(amount)")
+            XCTAssertEqual(parser.destination, deposit, amount)
+            XCTAssertEqual(parser.destinationType, .usdcBase, amount)
+        }
+    }
+
+    func testERC681ToleratesOneLeadingSlashAndAnUpperCaseScheme() {
+        XCTAssertEqual(
+            QRParser("ethereum:/\(baseUSDCContract)@8453/transfer?address=\(deposit)").destinationType,
+            .usdcBase
+        )
+        XCTAssertEqual(
+            QRParser("ETHEREUM:\(baseUSDCContract)@8453/transfer?address=\(deposit)").destinationType,
+            .usdcBase
+        )
+    }
+
+    func testERC681AcceptsAnUpperCase0XDepositPrefix() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@8453/transfer?address=0X\(deposit.dropFirst(2))"
+        )
+        XCTAssertEqual(parser.destinationType, .usdcBase)
+    }
+
+    func testERC681FirstAddressParamWins() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@8453/transfer?address=\(deposit)&address=0x\(String(repeating: "f", count: 40))"
+        )
+        XCTAssertEqual(parser.destination, deposit)
+    }
+
+    func testERC681PercentEncodedAmpersandStaysInsideBrantaID() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@8453/transfer?address=\(deposit)&branta_id=a%26b&branta_secret=s"
+        )
+        XCTAssertEqual(parser.onChainEncryptionText, "a&b")
+        XCTAssertEqual(parser.onChainEncryptionSecret, "s")
+    }
+
+    func testERC681ParamsInTheFragmentAreNotRead() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@8453/transfer?address=\(deposit)#&branta_id=abc&branta_secret=1234"
+        )
+        XCTAssertEqual(parser.destinationType, .usdcBase)
+        XCTAssertEqual(parser.onChainEncryptionText, "")
+    }
+
+    func testERC681QueryAfterAFragmentIsNotRead() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@8453/transfer#x?address=\(deposit)&branta_id=a&branta_secret=b"
+        )
+        XCTAssertNil(parser.destinationType)
+        XCTAssertEqual(parser.onChainEncryptionText, "")
+        XCTAssertTrue(parser.expectedSecretKeyTypes.isEmpty)
+    }
+
+    func testERC681FragmentAfterTheQueryIsDropped() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@8453/transfer?address=\(deposit)&branta_id=a&branta_secret=b#address=0x2"
+        )
+        XCTAssertEqual(parser.destination, deposit)
+        XCTAssertEqual(parser.onChainEncryptionText, "a")
+        XCTAssertEqual(parser.onChainEncryptionSecret, "b")
+    }
+
+    func testBitcoinFragmentDoesNotBleedIntoTheLastParam() {
+        let parser = QRParser("bitcoin:\(bitcoinAddress)?branta_id=a&branta_secret=b#frag")
+        XCTAssertEqual(parser.onChainEncryptionSecret, "b")
+        XCTAssertEqual(QRParser("bitcoin:\(bitcoinAddress)#x?branta_id=a&branta_secret=b").onChainEncryptionText, "")
+    }
+
+    func testERC681ChainIDBeyond15DigitsIsUntyped() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@\(String(repeating: "9", count: 5000))/transfer?address=\(deposit)"
+        )
+        XCTAssertNil(parser.destinationType)
+    }
+
+    func testERC681LeadingZeroChainIDStillSelectsTheRail() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@\(String(repeating: "0", count: 4500))8453/transfer?address=\(deposit)"
+        )
+        XCTAssertEqual(parser.destinationType, .usdcBase)
+    }
+
+    func testIncompleteERC681FormsDoNotBind() {
+        let forms = [
+            // No chain id.
+            "ethereum:\(baseUSDCContract)/transfer?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            // Payment-request prefix and ENS-style forms.
+            "ethereum:pay-\(baseUSDCContract)@8453/transfer?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            "ethereum:vitalik.eth@8453/transfer?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            // // makes the contract an authority, not a path.
+            "ethereum://\(baseUSDCContract)@8453/transfer?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            // Only transfer is a payment. approve and transferFrom are not.
+            "ethereum:\(baseUSDCContract)@8453/approve?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            "ethereum:\(baseUSDCContract)@8453/transferFrom?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            // Path parameters after the function name.
+            "ethereum:\(baseUSDCContract)@8453/transfer;x=1?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            // Chain id forms that are not plain digits.
+            "ethereum:\(baseUSDCContract)@0x2105/transfer?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            "ethereum:\(baseUSDCContract)@-8453/transfer?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            "ethereum:\(baseUSDCContract)@+8453/transfer?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            "ethereum:\(baseUSDCContract)@/transfer?address=\(deposit)&branta_id=abc&branta_secret=1234",
+            // No address, a truncated address, or an ENS recipient.
+            "ethereum:\(baseUSDCContract)@8453/transfer?branta_id=abc&branta_secret=1234",
+            "ethereum:\(baseUSDCContract)@8453/transfer?address=0x1234&branta_id=abc&branta_secret=1234",
+            "ethereum:\(baseUSDCContract)@8453/transfer?address=vitalik.eth&branta_id=abc&branta_secret=1234",
         ]
-        for (scheme, family) in cases {
-            let parser = QRParser("\(scheme):someaddress?value=1&branta_id=enc&branta_secret=sec")
-            XCTAssertEqual(parser.destination, "someaddress", scheme)
-            XCTAssertNil(parser.destinationType, scheme)
-            XCTAssertTrue(parser.destinations[0].secretKey, scheme)
-            XCTAssertEqual(parser.expectedSecretKeyTypes, family, scheme)
-            XCTAssertEqual(parser.onChainEncryptionText, "enc", scheme)
-            XCTAssertEqual(parser.onChainEncryptionSecret, "sec", scheme)
+        for uri in forms {
+            let parser = QRParser(uri)
+            XCTAssertNil(parser.destinationType, uri)
+            XCTAssertTrue(parser.expectedSecretKeyTypes.isEmpty, uri)
+            XCTAssertEqual(parser.onChainEncryptionText, "", uri)
+            XCTAssertFalse(parser.destinations[0].secretKey, uri)
         }
-        XCTAssertEqual(ethereumEvmDestinationTypes, [.usdtEthereum, .usdcEthereum])
-        XCTAssertEqual(tronDestinationTypes, [.usdtTron])
-        XCTAssertEqual(Set(secretKeyURIFamilies.keys), ["pol", "eth", "bsc", "tron", "ton", "sol"])
     }
 
-    func testIsSecretKeyAddressTypeCoversBitcoinAndEveryStableFamilyMember() {
-        XCTAssertTrue(isSecretKeyAddressType(.bitcoinAddress))
-        for family in secretKeyURIFamilies.values {
-            for type in family {
-                XCTAssertTrue(isSecretKeyAddressType(type), type.rawValue)
-            }
+    func testUnknownContractDoesNotBind() {
+        let parser = QRParser(
+            "ethereum:0x\(String(repeating: "2", count: 40))@8453/transfer?address=\(deposit)&branta_id=a&branta_secret=b"
+        )
+        XCTAssertNil(parser.destinationType)
+        XCTAssertEqual(parser.onChainEncryptionText, "")
+    }
+
+    func testAContractOnTheWrongChainDoesNotBind() {
+        let parser = QRParser(
+            "ethereum:\(baseUSDCContract)@1/transfer?address=\(deposit)&branta_id=a&branta_secret=b"
+        )
+        XCTAssertNil(parser.destinationType)
+        XCTAssertEqual(parser.onChainEncryptionText, "")
+    }
+
+    func testUnparseableAuthorityIsAnUntypedDestination() {
+        let parser = QRParser("ethereum://[bad/transfer")
+        XCTAssertNil(parser.destinationType)
+        XCTAssertEqual(parser.destination, "ethereum://[bad/transfer")
+        // Other schemes never throw either. They carry no Branta params, so nothing is bound.
+        let bitcoin = QRParser("bitcoin://[bad")
+        XCTAssertEqual(bitcoin.onChainEncryptionText, "")
+        XCTAssertTrue(bitcoin.expectedSecretKeyTypes.isEmpty || bitcoin.expectedSecretKeyTypes == [.bitcoinAddress])
+    }
+
+    func testRemovedChainSchemesDoNotBind() {
+        for scheme in ["pol", "eth", "bsc", "tron", "ton", "sol"] {
+            let text = "\(scheme):0x278297528c32eCa01295B0d2135984d3442ec963?value=50&branta_id=abc&branta_secret=1234"
+            let parser = QRParser(text)
+            XCTAssertEqual(parser.destination, text, scheme)
+            XCTAssertNil(parser.destinationType, scheme)
+            XCTAssertFalse(parser.destinations[0].secretKey, scheme)
+            XCTAssertTrue(parser.expectedSecretKeyTypes.isEmpty, scheme)
+            XCTAssertFalse(parser.isOnChainZK(), scheme)
         }
+    }
+
+    func testEVMTokenRailsCoverFiveNetworksWithOneTypeEach() {
+        XCTAssertEqual(Set(evmTokenRails.map(\.chainID)), [1, 137, 8453, 42161, 56])
+        XCTAssertEqual(evmTokenRails.count, 10)
+        XCTAssertEqual(Set(evmTokenRails.map(\.type)).count, 10)
+        for rail in evmTokenRails {
+            XCTAssertEqual(rail.contract, rail.contract.lowercased())
+        }
+    }
+
+    func testEVMTokenTypeSelectsByChainIDAndContract() {
+        XCTAssertEqual(evmTokenType(chainID: 8453, contract: baseUSDCContract), .usdcBase)
+        XCTAssertEqual(evmTokenType(chainID: 8453, contract: baseUSDCContract.lowercased()), .usdcBase)
+        // Same contract on the wrong chain is not a rail.
+        XCTAssertNil(evmTokenType(chainID: 1, contract: baseUSDCContract))
+        // Polygon bridged USDC.e is not the native USDC contract.
+        XCTAssertNil(evmTokenType(chainID: 137, contract: "0x2791bca1f2de4661ed88a30c99a7a9449aa84174"))
+        // Arbitrum Nova is not Arbitrum One.
+        XCTAssertNil(evmTokenType(chainID: 42170, contract: "0xaf88d065e77c8cc2239327c5edb3a432268e5831"))
+    }
+
+    func testIsSecretKeyAddressTypeCoversBitcoinEVMRailsAndPostOnlyTypes() {
+        XCTAssertTrue(isSecretKeyAddressType(.bitcoinAddress))
+        for rail in evmTokenRails {
+            XCTAssertTrue(isSecretKeyAddressType(rail.type), rail.type.rawValue)
+        }
+        // Tron, TON, and Solana still encrypt on addPayment. They have no verify URI.
+        for type in [DestinationType.usdtTron, .usdtTon, .usdtSolana, .usdcSolana] {
+            XCTAssertTrue(isSecretKeyAddressType(type), type.rawValue)
+        }
+        XCTAssertFalse(isSecretKeyAddressType(.bolt11))
         XCTAssertFalse(isSecretKeyAddressType(.arkAddress))
         XCTAssertFalse(isSecretKeyAddressType(.silentPayment))
-        XCTAssertEqual(DestinationType(rawValue: "usdt_tron"), .usdtTron)
-        XCTAssertEqual(DestinationType(rawValue: "usdc_solana"), .usdcSolana)
-        XCTAssertNil(DestinationType(rawValue: "usdc_ton"))
-        XCTAssertEqual(polygonEvmDestinationTypes, [.usdtPolygon, .usdcPolygon])
-        XCTAssertFalse(isSecretKeyAddressType(.bolt11))
     }
 
-    func testBitcoinUriExpectsBitcoinSecretKeyFamily() {
+    func testDestinationTypeRawValuesIncludeBaseAndArbitrum() {
+        XCTAssertEqual(DestinationType(rawValue: "usdt_tron"), .usdtTron)
+        XCTAssertEqual(DestinationType(rawValue: "usdt_base"), .usdtBase)
+        XCTAssertEqual(DestinationType(rawValue: "usdc_base"), .usdcBase)
+        XCTAssertEqual(DestinationType(rawValue: "usdt_arbitrum"), .usdtArbitrum)
+        XCTAssertEqual(DestinationType(rawValue: "usdc_arbitrum"), .usdcArbitrum)
+        XCTAssertNil(DestinationType(rawValue: "usdc_ton"))
+    }
+
+    func testBitcoinUriExpectsTheBitcoinSecretKeyType() {
         let parser = QRParser("bitcoin:bc1qmerchant?branta_id=enc&branta_secret=sec")
         XCTAssertTrue(parser.destinations[0].secretKey)
         XCTAssertEqual(parser.expectedSecretKeyTypes, [.bitcoinAddress])

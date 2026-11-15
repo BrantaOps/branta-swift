@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0] - 2026-11-15
+
+### Added
+- Destination types `usdtBase`, `usdcBase`, `usdtArbitrum`, and `usdcArbitrum`. `addPayment` encrypts them with the same UUID secret as the other stablecoin address rails.
+
+### Changed
+- `verify` takes EVM USDT and USDC as ERC-681 `ethereum:<token-contract>@<chain-id>/transfer?address=<deposit>&uint256=<amount>`, plus `branta_id` and `branta_secret`. The chain id and token contract select one destination type. `uint256` is not part of the match.
+
+### Fixed
+- A `?` after a `#` is no longer read as a query, for `bitcoin:` and ERC-681 URIs alike.
+
+### Removed
+- **Breaking:** `verify` no longer accepts `pol:`, `eth:`, `bsc:`, `tron:`, `ton:`, or `sol:`. These return `unknown` without a lookup. Switch EVM stablecoin QR codes to the ERC-681 form above.
+
+### Notes
+- `addPayment` still encrypts `usdtTron`, `usdtTon`, `usdtSolana`, and `usdcSolana`. They have no verify URI. Matches `@branta-ops/branta` 4.4.0.
+
 ## [4.3.0] - 2026-11-12
 
 ### Added

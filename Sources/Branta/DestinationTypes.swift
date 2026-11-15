@@ -16,30 +16,49 @@ public enum DestinationType: String, Sendable, Equatable, Codable {
     case usdtTon = "usdt_ton"
     case usdtSolana = "usdt_solana"
     case usdcSolana = "usdc_solana"
+    case usdtBase = "usdt_base"
+    case usdcBase = "usdc_base"
+    case usdtArbitrum = "usdt_arbitrum"
+    case usdcArbitrum = "usdc_arbitrum"
 }
 
-/// Polygon EVM secret-key rails. A `pol:` URI maps to this family for verify
-/// (match-if-any). Token is still the destination type on the payment.
-let polygonEvmDestinationTypes: [DestinationType] = [.usdtPolygon, .usdcPolygon]
-let ethereumEvmDestinationTypes: [DestinationType] = [.usdtEthereum, .usdcEthereum]
-let bscEvmDestinationTypes: [DestinationType] = [.usdtBsc, .usdcBsc]
-let tronDestinationTypes: [DestinationType] = [.usdtTron]
-let tonDestinationTypes: [DestinationType] = [.usdtTon]
-let solanaDestinationTypes: [DestinationType] = [.usdtSolana, .usdcSolana]
+/// An ERC-681 `ethereum:<contract>@<chainId>/transfer` rail.
+struct EVMTokenRail {
+    let chainID: Int
+    /// Lowercase, so lookup is case-insensitive.
+    let contract: String
+    let type: DestinationType
+}
 
-/// URI scheme -> secret-key destination family for verify (match-if-any).
-let secretKeyURIFamilies: [String: [DestinationType]] = [
-    "pol": polygonEvmDestinationTypes,
-    "eth": ethereumEvmDestinationTypes,
-    "bsc": bscEvmDestinationTypes,
-    "tron": tronDestinationTypes,
-    "ton": tonDestinationTypes,
-    "sol": solanaDestinationTypes,
+/// Chain id plus token contract select one destination type.
+let evmTokenRails: [EVMTokenRail] = [
+    EVMTokenRail(chainID: 1, contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", type: .usdcEthereum),
+    EVMTokenRail(chainID: 1, contract: "0xdac17f958d2ee523a2206206994597c13d831ec7", type: .usdtEthereum),
+    EVMTokenRail(chainID: 137, contract: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", type: .usdcPolygon),
+    EVMTokenRail(chainID: 137, contract: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f", type: .usdtPolygon),
+    EVMTokenRail(chainID: 8453, contract: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", type: .usdcBase),
+    EVMTokenRail(chainID: 8453, contract: "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2", type: .usdtBase),
+    EVMTokenRail(chainID: 42161, contract: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", type: .usdcArbitrum),
+    EVMTokenRail(chainID: 42161, contract: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", type: .usdtArbitrum),
+    EVMTokenRail(chainID: 56, contract: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", type: .usdcBsc),
+    EVMTokenRail(chainID: 56, contract: "0x55d398326f99059ff775485246999027b3197955", type: .usdtBsc),
 ]
+
+func evmTokenType(chainID: Int, contract: String) -> DestinationType? {
+    let needle = contract.lowercased()
+    return evmTokenRails.first { $0.chainID == chainID && $0.contract == needle }?.type
+}
+
+/// Address rails `addPayment` encrypts with one UUID secret.
+/// Tron, TON, and Solana are included because `addPayment` still encrypts them.
+/// They have no verify URI.
+private let uuidSecretDestinationTypes: Set<DestinationType> = Set(
+    [.bitcoinAddress, .usdtTron, .usdtTon, .usdtSolana, .usdcSolana] + evmTokenRails.map(\.type)
+)
 
 /// Address rails encrypted with a random `branta_secret` (not a derived key).
 func isSecretKeyAddressType(_ type: DestinationType) -> Bool {
-    type == .bitcoinAddress || secretKeyURIFamilies.values.contains { $0.contains(type) }
+    uuidSecretDestinationTypes.contains(type)
 }
 
 public enum VerifyStatus: String, Sendable, Equatable {

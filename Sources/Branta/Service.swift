@@ -242,7 +242,7 @@ public final class BrantaService {
             let destination = payment.destinations[index]
             guard destination.isEncrypted else { continue }
             guard let type = destination.type, isSecretKeyAddressType(type) else { continue }
-            // Outside this QR's rail family (e.g. bitcoin when scanning eth:) — leave encrypted.
+            // Not the type this scan names (for example bitcoin on an ERC-681 scan) — leave encrypted.
             if !expectedOnChainTypes.isEmpty && !expectedOnChainTypes.contains(type) { continue }
             if encryptionKey.isEmpty { continue }
             let decrypted: String
@@ -252,7 +252,7 @@ public final class BrantaService {
                 continue
             }
             decryptedExpectedRail = true
-            // Match-if-any within the family: a sibling rail with a different address stays encrypted.
+            // A decrypted value that is not the scanned address stays encrypted.
             if !expectedOnChainAddress.isEmpty && !addressesMatch(decrypted, expectedOnChainAddress) {
                 continue
             }
@@ -262,7 +262,7 @@ public final class BrantaService {
             putIfAbsent(id: destination.id, key: encryptionKey, into: &keys)
             tryDecryptMetadata(payment: &payment, index: index, keyUsed: encryptionKey)
         }
-        // Tampered only when a family rail decrypted and none matched the scanned address.
+        // Tampered only when a destination of the scanned type decrypted and none matched the address.
         if !expectedOnChainAddress.isEmpty && !onChainBound && decryptedExpectedRail {
             throw LookupFailure.tampered
         }
