@@ -6,7 +6,7 @@ enum WireCoding {
     }
 
     /// Decodes a GET payments body. Empty / null / non-array bodies return `[]`
-    /// (match JS/Python). Malformed JSON still throws for the caller to map to `incomplete`.
+    /// (match the other SDKs). Malformed JSON still throws for the caller to map to `incomplete`.
     static func decodePayments(_ data: Data) throws -> [Payment] {
         if data.isEmpty { return [] }
         let object = try JSONSerialization.jsonObject(with: data)
