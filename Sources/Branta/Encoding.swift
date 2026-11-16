@@ -11,7 +11,7 @@ func urlFragment(for keys: [(String, String)]) -> String {
     return "#" + keys.map { "k-\(fragmentEscape($0.0))=\(fragmentEscape($0.1))" }.joined(separator: "&")
 }
 
-/// Percent-encodes everything except unreserved characters, matching .NET `Uri.EscapeDataString`.
+/// Percent-encodes everything except RFC 3986 unreserved characters.
 /// This encodes `+`, `/`, and `=`, which appear in base64 ciphertext lookup values.
 func pathEscape(_ value: String) -> String {
     percentEncode(value, safe: isPathUnreserved)
