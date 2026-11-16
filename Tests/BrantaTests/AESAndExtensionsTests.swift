@@ -38,6 +38,16 @@ final class AESTests: XCTestCase {
         XCTAssertEqual(try AESEncryption.decrypt(encryptedValue: expected, secret: "my-secret"), "hello world")
     }
 
+    // Derived-key vector, asserted by every Branta SDK. The key is the normalized hash of
+    // "LNBC10U1PTestInvoice" and the value is encrypted lowercased. Do not regenerate these
+    // from this code.
+    func testDerivedKeyFixedVectorMatchesEverySDK() throws {
+        let key = "261D7974DC0541402A222AC17973D3FF412878C1C179FCD4D866094D610B4496"
+        let expected = "WywBRexAiHTi2mnHK/W1DIN79bF1XVhU3BdC3DWpUsdhs5NMbdyZyzWsdjfuFgIV"
+        XCTAssertEqual(try AESEncryption.encrypt(value: "lnbc10u1ptestinvoice", secret: key, deterministicNonce: true), expected)
+        XCTAssertEqual(try AESEncryption.decrypt(encryptedValue: expected, secret: key), "lnbc10u1ptestinvoice")
+    }
+
     func testDeterministicBolt11RoundTrip() throws {
         let value = "lnbc100n1ptest"
         let key = normalizedHash(value)
@@ -77,6 +87,17 @@ final class ExtensionTests: XCTestCase {
         XCTAssertNil(derivedKeyType(of: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"))
         XCTAssertNil(derivedKeyType(of: "lno1qqexample"))
         XCTAssertNil(derivedKeyType(of: "LNURL1TESTVALUE"))
+    }
+
+    // Fixed vectors, asserted by every Branta SDK.
+    func testNormalizedHashFixedVectorMatchesEverySDK() {
+        let test = "9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08"
+        XCTAssertEqual(normalizedHash("test"), test)
+        XCTAssertEqual(normalizedHash("TEST"), test)
+        XCTAssertEqual(
+            normalizedHash("LNBC10U1PTestInvoice"),
+            "261D7974DC0541402A222AC17973D3FF412878C1C179FCD4D866094D610B4496"
+        )
     }
 
     func testNormalizedHash() {
