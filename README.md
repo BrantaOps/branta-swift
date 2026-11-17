@@ -45,15 +45,13 @@ case .unknown:
 case .tampered:
     // Destination was altered. Warn. Do not show a verified card.
 case .incomplete:
-    // 5xx, 429, or unreachable. Tell the user. Do not treat this as unknown.
+    // Branta could not complete the check. Tell the user. Do not block send.
 }
 ```
 
 A logo on the wrong origin throws. Do not treat that as `unknown`.
 
 Pass the scanned or pasted text to `verify`. A Bitcoin or EVM stablecoin lookup needs `branta_id` and `branta_secret` in the URI. bolt11, Ark, and silent payments resolve from the value. A bare address is `unknown`. The full rules are on [Status rules](https://developer.branta.pro/setup/send/status-rules), and supported chains and contracts are on [Destination types](https://developer.branta.pro/destination-types).
-
-A 404 is `unknown`. 5xx, 429, no network, a timeout, or a malformed GET body is `incomplete`.
 
 ## Receive
 
