@@ -1,6 +1,26 @@
 # Branta Swift SDK
 
-If you are implementing this SDK in a consumer project, product rules (send vs receive, `match` / `unknown` / `tampered`, parent platforms) live in the [developer docs](https://developer.branta.pro). `README.md` is the Swift package: install, constructor, and samples.
+Swift package `Branta`. Consumers (wallets, platforms, parent platforms) call `BrantaService` to look up or post payments to Branta's V2 API. `README.md` is the install, constructor, and samples guide.
+
+## Behavior contract
+
+What `verify` returns and how ERC-681 is parsed: [Status rules](https://developer.branta.pro/setup/send/status-rules). Which rails encrypt with what key: [Encryption](https://developer.branta.pro/setup/receive/encryption). Send handling is on [Send](https://developer.branta.pro/setup/send), and the type list on [Destination types](https://developer.branta.pro/destination-types). Do not restate them here. Change the docs first, then the SDK.
+
+Invariants that break silently. Check them before you change `verify` or `addPayment`:
+
+- A raw on-chain address (including `tb1` / `bcrt1` / bare `0x`) is `unknown` and does not GET.
+- A swapped address is `tampered`. `unknown`, `tampered`, and `incomplete` are returned, never thrown.
+- The token is `matchedDestinations[].type`, never the URI scheme.
+- A logo-domain mismatch throws. Every other lookup failure is a status.
+- `addPayment` encrypts a copy and leaves the caller's `Payment` unchanged.
+- Keep parity with every 4.x Branta SDK. A public method added or changed here is mirrored in each of them.
+
+## Swift specifics
+
+- A logo-domain mismatch throws `BrantaPaymentError` (not `Exception`).
+- Acronym casing follows Swift: `verifyURL`, `isAPIKeyValid`.
+- `DestinationType` is only what `addPayment` accepts. It also includes `usdt_tron`, `usdt_ton`, `usdt_solana`, and `usdc_solana`. They can be posted but no URI verifies them, and they are not on the public Destination types page. There is no `usdc_ton`.
+- `hmacSecret` is deprecated. A shared `apiKey` plus `setChildPlatform` is the parent-platform path.
 
 ## Commands
 
@@ -15,13 +35,13 @@ Live write/lookup tests run only when `BRANTA_RUN_INTEGRATION=1` (and `BRANTA_AP
 
 Public API is whatever the `Branta` module exposes: `BrantaService`, `PaymentBuilder`, `BrantaApiOptions`, `BrantaEnvironment`, `DestinationType`, `VerifyStatus`, `VerifyResult`, `AddPaymentResult`, payment models, and `BrantaPaymentError`.
 
-Do **not** make public: `BrantaClient`, `QRParser`, AES helpers, rail-family lists (`secretKeyURIFamilies`, per-family arrays), or `isSecretKeyAddressType`. Prefer package-internal (`internal`) for those. `PublicAPITests` uses `import Branta` (not `@testable`) to lock the consumer surface.
+Do **not** make public: `BrantaClient`, `QRParser`, AES helpers, the EVM rail table (`evmTokenRails`, `evmTokenType`), or `isSecretKeyAddressType`. Prefer package-internal (`internal`) for those. `PublicAPITests` uses `import Branta` (not `@testable`) to lock the consumer surface.
 
 | File | Role |
 |------|------|
 | `Service.swift` | Encrypt/decrypt orchestration around HTTP. Do not export the client. |
 | `Client.swift` | Raw HTTP. Timeouts map transport failures to incomplete on GET. |
-| `DestinationTypes.swift` | `DestinationType`, verify statuses, rail families (internal). |
+| `DestinationTypes.swift` | `DestinationType`, verify statuses, and the EVM rail table (internal). |
 | `Options.swift` | Environment, `BrantaApiOptions`, errors. |
 | `Models.swift` | Payment / destination / result types. |
 | `WireCoding.swift` | JSON encode/decode. |
@@ -29,12 +49,3 @@ Do **not** make public: `BrantaClient`, `QRParser`, AES helpers, rail-family lis
 | `PaymentBuilder.swift` | Fluent `Payment` construction. |
 | `Encoding.swift` | Hash, percent-encoding, HMAC, origin checks. |
 | `AES.swift` | Crypto primitives (internal). |
-
-## Key behaviors
-
-- `verify` is the only lookup. A raw on-chain address (including bare `0x`) is `unknown` and does not GET. `addPayment` encrypts a copy.
-- `DestinationType` is only what `addPayment` accepts: bitcoin, bolt11, ark, silent payment, and the stablecoin rails (`usdt_polygon` … `usdc_solana`, including `usdt_base`, `usdc_base`, `usdt_arbitrum`, `usdc_arbitrum`). No `usdc_ton` yet. EVM USDT/USDC verify is ERC-681: `ethereum:<contract>@<chainId>/transfer?address=<deposit>` plus `branta_id` / `branta_secret`. Chain id plus contract select one destination type (`evmTokenRails`, internal). `uint256` is not bound. `pol:`, `eth:`, `bsc:`, `tron:`, `ton:`, and `sol:` do not verify and do not GET. `addPayment` still encrypts `usdt_tron`, `usdt_ton`, `usdt_solana`, and `usdc_solana`. Token is on `matchedDestinations[].type`.
-- `verify` `match` includes `matchedDestinations` — wallets send from that list.
-- `tampered` and `incomplete` are statuses. Do not throw them. Logo-domain mismatches still throw `BrantaPaymentError`. Malformed GET bodies and network/timeouts are `incomplete`.
-- `hmacSecret` is deprecated — shared `apiKey` + `setChildPlatform` is the parent-platform path.
-- Acronym casing follows Swift (`verifyURL`, `isAPIKeyValid`). Error type is `BrantaPaymentError` (not `Exception`).
