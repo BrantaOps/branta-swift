@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `verify` takes EVM USDT and USDC as ERC-681 `ethereum:<token-contract>@<chain-id>/transfer?address=<deposit>&uint256=<amount>`, plus `branta_id` and `branta_secret`. The chain id and token contract select one destination type. `uint256` is not part of the match.
 
 ### Fixed
+- A `#fragment` after the query is no longer read into the last query parameter. `bitcoin:…?branta_id=…&branta_secret=…#frag` used to read the secret as `…#frag`, fail to decrypt, and return `unknown`. It now verifies.
 - A `?` after a `#` is no longer read as a query, for `bitcoin:` and ERC-681 URIs alike.
 
 ### Removed
