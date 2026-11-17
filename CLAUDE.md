@@ -31,6 +31,8 @@ BRANTA_RUN_INTEGRATION=1 BRANTA_API_KEY=… swift test --filter MultiRailRoundTr
 
 Live write/lookup tests run only when `BRANTA_RUN_INTEGRATION=1` (and `BRANTA_API_KEY` for POST).
 
+Release: add a `CHANGELOG.md` entry, then tag the release commit `vX.Y.Z` (with the `v` prefix) and push the tag. Swift Package Manager resolves versions from the tag, so there is nothing to publish. Do not tag until asked.
+
 ## Layout
 
 Public API is whatever the `Branta` module exposes: `BrantaService`, `PaymentBuilder`, `BrantaApiOptions`, `BrantaEnvironment`, `DestinationType`, `VerifyStatus`, `VerifyResult`, `AddPaymentResult`, payment models, and `BrantaPaymentError`.

@@ -89,12 +89,4 @@ swift test
 BRANTA_RUN_INTEGRATION=1 swift test --filter IntegrationTests
 ```
 
-## Publishing
-
-1. Add a changelog entry.
-2. Tag the release `vX.Y.Z` (the `v` prefix). Swift Package Manager resolves versions from the tag.
-3. Push the tag: `git push origin vX.Y.Z`
-
-## Responsible Disclosure
-
-Found critical bugs/vulnerabilities? Please email them to support@branta.pro. Thanks!
+[Security](SECURITY.md)
