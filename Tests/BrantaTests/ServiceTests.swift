@@ -411,13 +411,41 @@ final class ServiceTests: XCTestCase {
     private let usdtPolygonAddr = "0x278297528c32eCa01295B0d2135984d3442ec963"
     private let usdcPolygonAddr = "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"
     private let siblingUsdtAddr = "0x2222222222222222222222222222222222222222"
-    private let swappedPolygonAddr = "0x1111111111111111111111111111111111111111"
+    private let swappedEvmAddr = "0x" + String(repeating: "f", count: 40)
+    private let usdtEthereumAddr = "0xBF5550253939187432Ef4dccE8089765d3DCb47f"
+    private let usdcEthereumAddr = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    private let usdtTronAddr = "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb"
+    private let usdtTonAddr = "EQDtFpEwcFAEcRe5mLVh2N6C0y-_tur3BYOM93pEZPw390by"
+    private let usdtSolanaAddr = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+    private let usdcSolanaAddr = "7EqQdEULxWcraVx3mXKFjc84LhCkMGZCkRuDofycyinf"
 
-    private func polURI(_ address: String, encrypted: String, secret: String) -> String {
-        "pol:\(address)?value=50&user=send&currency=USD&branta_id=\(encrypted)&branta_secret=\(secret)"
+    private func rail(for type: DestinationType) -> EVMTokenRail {
+        evmTokenRails.first { $0.type == type }!
     }
 
-    func testPolUsdtMatchIgnoresAmountQuery() async throws {
+    /// ERC-681 transfer URI for one EVM rail, with the Branta params.
+    private func transferURI(
+        _ type: DestinationType,
+        _ address: String,
+        encrypted: String,
+        secret: String = "the-secret",
+        amount: String = "1000000"
+    ) -> String {
+        let rail = rail(for: type)
+        return "ethereum:\(rail.contract)@\(rail.chainID)/transfer?address=\(address)&uint256=\(amount)&branta_id=\(encrypted)&branta_secret=\(secret)"
+    }
+
+    /// One mixed-case deposit per rail, so a payment holding two rails never shares an address
+    /// and a lowercase scan still differs from the stored text.
+    private func deposit(for type: DestinationType) -> String {
+        let index = evmTokenRails.firstIndex { $0.type == type }! + 1
+        let hex = String(index, radix: 16)
+        return "0xAb" + String(repeating: "1", count: 38 - hex.count) + hex
+    }
+
+    // MARK: Polygon
+
+    func testPolygonUSDTMatchIgnoresAmount() async throws {
         client.getImpl = { lookup, _ in
             XCTAssertEqual(lookup, "enc-usdt")
             return [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon)])]
@@ -427,7 +455,7 @@ final class ServiceTests: XCTestCase {
             XCTAssertEqual(secret, "the-secret")
             return self.usdtPolygonAddr
         }
-        let result = try await service.verify(polURI(usdtPolygonAddr, encrypted: "enc-usdt", secret: "the-secret"))
+        let result = try await service.verify(transferURI(.usdtPolygon, usdtPolygonAddr, encrypted: "enc-usdt"))
         XCTAssertEqual(result.status, .match)
         XCTAssertEqual(result.payments[0].destinations[0].type, .usdtPolygon)
         XCTAssertEqual(result.payments[0].destinations[0].value, usdtPolygonAddr)
@@ -435,41 +463,42 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(result.matchedDestinations[0].type, .usdtPolygon)
     }
 
-    func testPolUsdtCaseInsensitiveMatch() async throws {
+    func testAmountIsNotPartOfTheMatch() async throws {
+        for amount in ["1", "50000000", "999999999999"] {
+            client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon)])] }
+            aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
+            let result = try await service.verify(
+                transferURI(.usdtPolygon, usdtPolygonAddr, encrypted: "enc-usdt", amount: amount)
+            )
+            XCTAssertEqual(result.status, .match, amount)
+        }
+    }
+
+    func testPolygonUSDTCaseInsensitiveMatch() async throws {
         client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon)])] }
         aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
-        let result = try await service.verify(polURI(usdtPolygonAddr.lowercased(), encrypted: "enc-usdt", secret: "the-secret"))
+        let result = try await service.verify(
+            transferURI(.usdtPolygon, usdtPolygonAddr.lowercased(), encrypted: "enc-usdt")
+        )
         XCTAssertEqual(result.status, .match)
     }
 
-    func testPolUsdt0xPrefixCaseInsensitiveMatch() async throws {
+    func testPolygonUSDT0xPrefixCaseInsensitiveMatch() async throws {
         client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon)])] }
         aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
         let mixed = "0X" + String(usdtPolygonAddr.dropFirst(2))
-        let result = try await service.verify(polURI(mixed, encrypted: "enc-usdt", secret: "the-secret"))
+        let result = try await service.verify(transferURI(.usdtPolygon, mixed, encrypted: "enc-usdt"))
         XCTAssertEqual(result.status, .match)
     }
 
-    func testPolUsdtSwappedIsTampered() async throws {
+    func testPolygonUSDTSwappedIsTampered() async throws {
         client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon)])] }
         aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
-        let result = try await service.verify(polURI(swappedPolygonAddr, encrypted: "enc-usdt", secret: "the-secret"))
+        let result = try await service.verify(transferURI(.usdtPolygon, swappedEvmAddr, encrypted: "enc-usdt"))
         XCTAssertEqual(result.status, .tampered)
     }
 
-    func testBareUsdtAddressIsUnknown() async throws {
-        let result = try await service.verify(usdtPolygonAddr)
-        XCTAssertEqual(result.status, .unknown)
-        XCTAssertTrue(client.gets.isEmpty)
-    }
-
-    func testPolWithoutBrantaParamsIsUnknown() async throws {
-        let result = try await service.verify("pol:\(usdtPolygonAddr)?value=50")
-        XCTAssertEqual(result.status, .unknown)
-        XCTAssertTrue(client.gets.isEmpty)
-    }
-
-    func testPolIgnoresSiblingBitcoinRail() async throws {
+    func testPolygonIgnoresSiblingBitcoinRail() async throws {
         client.getImpl = { _, _ in
             [Payment(destinations: [
                 self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
@@ -479,7 +508,7 @@ final class ServiceTests: XCTestCase {
         aes.decryptImpl = { value, _ in
             value == "cipher-usdt" ? self.usdtPolygonAddr : self.addr
         }
-        let result = try await service.verify(polURI(usdtPolygonAddr, encrypted: "enc-usdt", secret: "the-secret"))
+        let result = try await service.verify(transferURI(.usdtPolygon, usdtPolygonAddr, encrypted: "enc-usdt"))
         XCTAssertEqual(result.status, .match)
         XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
         XCTAssertEqual(result.payments[0].destinations[0].type, .bitcoinAddress)
@@ -505,7 +534,7 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(result.payments[0].destinations[1].type, .usdtPolygon)
     }
 
-    func testPolSwappedStillTamperedWithSiblingBitcoin() async throws {
+    func testPolygonSwappedStillTamperedWithSiblingBitcoin() async throws {
         client.getImpl = { _, _ in
             [Payment(destinations: [
                 self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
@@ -515,11 +544,11 @@ final class ServiceTests: XCTestCase {
         aes.decryptImpl = { value, _ in
             value == "cipher-usdt" ? self.usdtPolygonAddr : self.addr
         }
-        let result = try await service.verify(polURI(swappedPolygonAddr, encrypted: "enc-usdt", secret: "the-secret"))
+        let result = try await service.verify(transferURI(.usdtPolygon, swappedEvmAddr, encrypted: "enc-usdt"))
         XCTAssertEqual(result.status, .tampered)
     }
 
-    func testPolMatchIfAnyDualUsdt() async throws {
+    func testSecondUSDTDestinationWithAnotherAddressStaysEncrypted() async throws {
         client.getImpl = { _, _ in
             [Payment(destinations: [
                 self.encrypted("cipher-sib", id: "zk-sib", type: .usdtPolygon),
@@ -529,7 +558,7 @@ final class ServiceTests: XCTestCase {
         aes.decryptImpl = { value, _ in
             value == "cipher-sib" ? self.siblingUsdtAddr : self.usdtPolygonAddr
         }
-        let result = try await service.verify(polURI(usdtPolygonAddr, encrypted: "enc-usdt", secret: "the-secret"))
+        let result = try await service.verify(transferURI(.usdtPolygon, usdtPolygonAddr, encrypted: "enc-usdt"))
         XCTAssertEqual(result.status, .match)
         XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
         XCTAssertEqual(result.payments[0].destinations[0].value, "cipher-sib")
@@ -537,7 +566,7 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(result.payments[0].destinations[1].value, usdtPolygonAddr)
     }
 
-    func testPolSwappedTamperedWhenNoPolygonFamilyRailMatches() async throws {
+    func testSwappedIsTamperedWhenNoDestinationOfTheTypeMatches() async throws {
         client.getImpl = { _, _ in
             [Payment(destinations: [
                 self.encrypted("cipher-sib", id: "zk-sib", type: .usdtPolygon),
@@ -547,137 +576,109 @@ final class ServiceTests: XCTestCase {
         aes.decryptImpl = { value, _ in
             value == "cipher-sib" ? self.siblingUsdtAddr : self.usdtPolygonAddr
         }
-        let result = try await service.verify(polURI(swappedPolygonAddr, encrypted: "enc-usdt", secret: "the-secret"))
+        let result = try await service.verify(transferURI(.usdtPolygon, swappedEvmAddr, encrypted: "enc-usdt"))
         XCTAssertEqual(result.status, .tampered)
     }
 
-    func testPolUsdcMatch() async throws {
+    func testPolygonUSDCMatchAndSwapped() async throws {
         client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcPolygon)])] }
         aes.decryptImpl = { _, _ in self.usdcPolygonAddr }
-        let result = try await service.verify(polURI(usdcPolygonAddr, encrypted: "enc-usdc", secret: "the-secret"))
-        XCTAssertEqual(result.status, .match)
-        XCTAssertEqual(result.matchedDestinations[0].type, .usdcPolygon)
+        let match = try await service.verify(transferURI(.usdcPolygon, usdcPolygonAddr, encrypted: "enc-usdc"))
+        XCTAssertEqual(match.status, .match)
+        XCTAssertEqual(match.matchedDestinations[0].type, .usdcPolygon)
+        let swapped = try await service.verify(transferURI(.usdcPolygon, swappedEvmAddr, encrypted: "enc-usdc"))
+        XCTAssertEqual(swapped.status, .tampered)
     }
 
-    func testPolUsdcSwappedIsTampered() async throws {
-        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcPolygon)])] }
-        aes.decryptImpl = { _, _ in self.usdcPolygonAddr }
-        let result = try await service.verify(polURI(swappedPolygonAddr, encrypted: "enc-usdc", secret: "the-secret"))
-        XCTAssertEqual(result.status, .tampered)
+    func testScanBindsTheScannedTokenAndLeavesTheOtherEncrypted() async throws {
+        let cases: [(scan: DestinationType, address: String, boundIndex: Int)] = [
+            (.usdtPolygon, usdtPolygonAddr, 0),
+            (.usdcPolygon, usdcPolygonAddr, 1),
+        ]
+        for testCase in cases {
+            client.getImpl = { _, _ in
+                [Payment(destinations: [
+                    self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon),
+                    self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcPolygon),
+                ])]
+            }
+            aes.decryptImpl = { value, _ in
+                value == "cipher-usdt" ? self.usdtPolygonAddr : self.usdcPolygonAddr
+            }
+            let result = try await service.verify(transferURI(testCase.scan, testCase.address, encrypted: "enc-scan"))
+            XCTAssertEqual(result.status, .match, testCase.scan.rawValue)
+            for (index, destination) in result.payments[0].destinations.enumerated() {
+                XCTAssertEqual(destination.isEncrypted, index != testCase.boundIndex, testCase.scan.rawValue)
+            }
+        }
     }
 
-    func testPolBindsUsdtLeavesUsdcEncrypted() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [
-                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon),
-                self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcPolygon),
-            ])]
-        }
-        aes.decryptImpl = { value, _ in
-            value == "cipher-usdt" ? self.usdtPolygonAddr : self.usdcPolygonAddr
-        }
-        let result = try await service.verify(polURI(usdtPolygonAddr, encrypted: "enc-usdt", secret: "the-secret"))
-        XCTAssertEqual(result.status, .match)
-        XCTAssertFalse(result.payments[0].destinations[0].isEncrypted)
-        XCTAssertEqual(result.payments[0].destinations[0].type, .usdtPolygon)
-        XCTAssertTrue(result.payments[0].destinations[1].isEncrypted)
-        XCTAssertEqual(result.payments[0].destinations[1].type, .usdcPolygon)
-    }
-
-    func testPolBindsUsdcLeavesUsdtEncrypted() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [
-                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon),
-                self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcPolygon),
-            ])]
-        }
-        aes.decryptImpl = { value, _ in
-            value == "cipher-usdt" ? self.usdtPolygonAddr : self.usdcPolygonAddr
-        }
-        let result = try await service.verify(polURI(usdcPolygonAddr, encrypted: "enc-usdc", secret: "the-secret"))
-        XCTAssertEqual(result.status, .match)
-        XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
-        XCTAssertEqual(result.payments[0].destinations[0].type, .usdtPolygon)
-        XCTAssertFalse(result.payments[0].destinations[1].isEncrypted)
-        XCTAssertEqual(result.payments[0].destinations[1].type, .usdcPolygon)
-    }
-
-    func testPolWrongSecretIsUnknown() async throws {
+    func testPolygonWrongSecretIsUnknown() async throws {
         client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon)])] }
         aes.decryptImpl = { _, _ in throw AESError(message: "wrong key") }
-        let result = try await service.verify(polURI(usdtPolygonAddr, encrypted: "enc-usdt", secret: "wrong-secret"))
+        let result = try await service.verify(
+            transferURI(.usdtPolygon, usdtPolygonAddr, encrypted: "enc-usdt", secret: "wrong-secret")
+        )
         XCTAssertEqual(result.status, .unknown)
     }
 
-    func testSameAddressUsdtAndUsdcBothMatch() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [
-                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon),
-                self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcPolygon),
-            ])]
+    func testSameAddressUnderTwoTokensBindsOnlyTheScannedToken() async throws {
+        for scan in [DestinationType.usdtPolygon, .usdcPolygon] {
+            client.getImpl = { _, _ in
+                [Payment(destinations: [
+                    self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon),
+                    self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcPolygon),
+                ])]
+            }
+            aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
+            let result = try await service.verify(transferURI(scan, usdtPolygonAddr, encrypted: "enc-both"))
+            XCTAssertEqual(result.status, .match, scan.rawValue)
+            XCTAssertEqual(result.matchedDestinations.map(\.type), [scan], scan.rawValue)
         }
-        aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
-        let result = try await service.verify(polURI(usdtPolygonAddr, encrypted: "enc-both", secret: "the-secret"))
-        XCTAssertEqual(result.status, .match)
-        XCTAssertEqual(result.matchedDestinations.count, 2)
     }
 
-    private let usdtEthereumAddr = "0xBF5550253939187432Ef4dccE8089765d3DCb47f"
-    private let usdcEthereumAddr = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-    private let usdtBscAddr = "0x55d398326f99059fF775485246999027B3197955"
-    private let usdcBscAddr = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"
-    private let usdtTronAddr = "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb"
-    private let usdtTonAddr = "EQDtFpEwcFAEcRe5mLVh2N6C0y-_tur3BYOM93pEZPw390by"
-    private let usdtSolanaAddr = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
-    private let usdcSolanaAddr = "7EqQdEULxWcraVx3mXKFjc84LhCkMGZCkRuDofycyinf"
-    private let swappedEvmAddr = "0x1111111111111111111111111111111111111111"
-    private let swappedSolanaAddr = "11111111111111111111111111111111"
+    // MARK: Every EVM rail
 
-    private func chainURI(_ scheme: String, _ address: String, encrypted: String, secret: String) -> String {
-        "\(scheme):\(address)?value=50&branta_id=\(encrypted)&branta_secret=\(secret)"
-    }
+    func testEveryEVMRailMatchesAndReturnsTheScannedType() async throws {
+        for rail in evmTokenRails {
+            let type = rail.type
+            let address = deposit(for: type)
+            client.gets.removeAll()
+            client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher", id: "zk", type: type)])] }
+            aes.decryptImpl = { _, _ in address }
 
-    private func assertChainMatch(_ scheme: String, address: String, type: DestinationType) async throws {
-        client.getImpl = { lookup, _ in
-            XCTAssertEqual(lookup, "enc-chain")
-            return [Payment(destinations: [self.encrypted("cipher-chain", id: "zk-chain", type: type)])]
+            let result = try await service.verify(transferURI(type, address, encrypted: "enc-\(type.rawValue)"))
+            XCTAssertEqual(result.status, .match, type.rawValue)
+            XCTAssertEqual(client.gets, ["enc-\(type.rawValue)"], type.rawValue)
+            XCTAssertEqual(result.matchedDestinations.map(\.type), [type], type.rawValue)
+            XCTAssertEqual(result.matchedDestinations.map(\.value), [address], type.rawValue)
+
+            let lower = try await service.verify(transferURI(type, address.lowercased(), encrypted: "enc"))
+            XCTAssertEqual(lower.status, .match, type.rawValue)
+
+            let tampered = try await service.verify(transferURI(type, swappedEvmAddr, encrypted: "enc"))
+            XCTAssertEqual(tampered.status, .tampered, type.rawValue)
+            XCTAssertTrue(tampered.matchedDestinations.isEmpty, type.rawValue)
         }
-        aes.decryptImpl = { value, secret in
-            XCTAssertEqual(value, "cipher-chain")
-            XCTAssertEqual(secret, "the-secret")
-            return address
+    }
+
+    func testEveryEVMRailOnTheWrongChainOrWithoutBrantaParamsIsUnknownWithoutAGet() async throws {
+        for rail in evmTokenRails {
+            let address = deposit(for: rail.type)
+            let wrongChain = try await service.verify(
+                "ethereum:\(rail.contract)@999999/transfer?address=\(address)&branta_id=enc&branta_secret=the-secret"
+            )
+            XCTAssertEqual(wrongChain.status, .unknown, rail.type.rawValue)
+
+            let noParams = try await service.verify(
+                "ethereum:\(rail.contract)@\(rail.chainID)/transfer?address=\(address)&uint256=1000000"
+            )
+            XCTAssertEqual(noParams.status, .unknown, rail.type.rawValue)
         }
-        let result = try await service.verify(chainURI(scheme, address, encrypted: "enc-chain", secret: "the-secret"))
-        XCTAssertEqual(result.status, .match)
-        XCTAssertEqual(result.matchedDestinations.count, 1)
-        XCTAssertEqual(result.matchedDestinations[0].type, type)
-        XCTAssertEqual(result.matchedDestinations[0].value, address)
+        XCTAssertTrue(client.gets.isEmpty)
     }
 
-    func testEthUsdtMatch() async throws {
-        try await assertChainMatch("eth", address: usdtEthereumAddr, type: .usdtEthereum)
-    }
-
-    func testEthUsdtCaseInsensitiveMatch() async throws {
-        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-chain", id: "zk-chain", type: .usdtEthereum)])] }
-        aes.decryptImpl = { _, _ in self.usdtEthereumAddr }
-        let result = try await service.verify(
-            chainURI("eth", usdtEthereumAddr.lowercased(), encrypted: "enc-chain", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .match)
-    }
-
-    func testEthUsdt0xPrefixCaseInsensitiveMatch() async throws {
-        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-chain", id: "zk-chain", type: .usdtEthereum)])] }
-        aes.decryptImpl = { _, _ in self.usdtEthereumAddr }
-        let mixed = "0X" + String(usdtEthereumAddr.dropFirst(2))
-        let result = try await service.verify(
-            chainURI("eth", mixed, encrypted: "enc-chain", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .match)
-    }
-
-    func testEthIgnoresSiblingBitcoinRail() async throws {
+    func testEthereumScanIgnoresASiblingBitcoinRail() async throws {
         client.getImpl = { _, _ in
             [Payment(destinations: [
                 self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
@@ -687,200 +688,149 @@ final class ServiceTests: XCTestCase {
         aes.decryptImpl = { value, _ in
             value == "cipher-usdt" ? self.usdtEthereumAddr : self.addr
         }
-        let result = try await service.verify(
-            chainURI("eth", usdtEthereumAddr, encrypted: "enc-usdt", secret: "the-secret")
-        )
+        let result = try await service.verify(transferURI(.usdtEthereum, usdtEthereumAddr, encrypted: "enc-usdt"))
         XCTAssertEqual(result.status, .match)
         XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
         XCTAssertEqual(result.matchedDestinations[0].type, .usdtEthereum)
+
+        let swapped = try await service.verify(transferURI(.usdtEthereum, swappedEvmAddr, encrypted: "enc-usdt"))
+        XCTAssertEqual(swapped.status, .tampered)
     }
 
-    func testEthSwappedStillTamperedWhenSiblingBitcoinPresent() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [
-                self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
-                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtEthereum),
-            ])]
-        }
-        aes.decryptImpl = { value, _ in
-            value == "cipher-usdt" ? self.usdtEthereumAddr : self.addr
-        }
-        let result = try await service.verify(
-            chainURI("eth", swappedEvmAddr, encrypted: "enc-usdt", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .tampered)
-    }
-
-    func testBscUsdtMatch() async throws {
-        try await assertChainMatch("bsc", address: usdtBscAddr, type: .usdtBsc)
-    }
-
-    func testBscIgnoresSiblingBitcoinRail() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [
-                self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
-                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtBsc),
-            ])]
-        }
-        aes.decryptImpl = { value, _ in
-            value == "cipher-usdt" ? self.usdtBscAddr : self.addr
-        }
-        let result = try await service.verify(
-            chainURI("bsc", usdtBscAddr, encrypted: "enc-usdt", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .match)
-        XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
-        XCTAssertEqual(result.matchedDestinations[0].type, .usdtBsc)
-    }
-
-    func testBscSwappedStillTamperedWhenSiblingBitcoinPresent() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [
-                self.encrypted("cipher-btc", id: "zk-btc", type: .bitcoinAddress),
-                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtBsc),
-            ])]
-        }
-        aes.decryptImpl = { value, _ in
-            value == "cipher-usdt" ? self.usdtBscAddr : self.addr
-        }
-        let result = try await service.verify(
-            chainURI("bsc", swappedEvmAddr, encrypted: "enc-usdt", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .tampered)
-    }
-
-    func testTronUsdtMatch() async throws {
-        try await assertChainMatch("tron", address: usdtTronAddr, type: .usdtTron)
-    }
-
-    func testTonUsdtMatch() async throws {
-        try await assertChainMatch("ton", address: usdtTonAddr, type: .usdtTon)
-    }
-
-    func testSolUsdcMatch() async throws {
-        try await assertChainMatch("sol", address: usdcSolanaAddr, type: .usdcSolana)
-    }
-
-    func testEthSwappedIsTampered() async throws {
-        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-chain", id: "zk-chain", type: .usdtEthereum)])] }
-        aes.decryptImpl = { _, _ in self.usdtEthereumAddr }
-        let result = try await service.verify(
-            chainURI("eth", swappedEvmAddr, encrypted: "enc-chain", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .tampered)
-    }
-
-    func testTronSwappedIsTampered() async throws {
-        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-chain", id: "zk-chain", type: .usdtTron)])] }
-        aes.decryptImpl = { _, _ in self.usdtTronAddr }
-        let result = try await service.verify(
-            chainURI("tron", "TAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", encrypted: "enc-chain", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .tampered)
-    }
-
-    func testEthBindsUsdtLeavesUsdcEncrypted() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [
+    func testADualTokenPaymentBindsOnlyTheScannedToken() async throws {
+        let dualToken = {
+            Payment(destinations: [
                 self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtEthereum),
                 self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcEthereum),
-            ])]
+            ])
         }
         aes.decryptImpl = { value, _ in
             value == "cipher-usdt" ? self.usdtEthereumAddr : self.usdcEthereumAddr
         }
-        let result = try await service.verify(
-            chainURI("eth", usdtEthereumAddr, encrypted: "enc-usdt", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .match)
-        XCTAssertEqual(result.matchedDestinations.count, 1)
-        XCTAssertEqual(result.matchedDestinations[0].type, .usdtEthereum)
-        XCTAssertFalse(result.payments[0].destinations[0].isEncrypted)
-        XCTAssertTrue(result.payments[0].destinations[1].isEncrypted)
-        XCTAssertEqual(result.payments[0].destinations[1].value, "cipher-usdc")
+        // Both scans send the USDT ciphertext as branta_id. Only the token named in the URI binds.
+        client.getImpl = { _, _ in [dualToken()] }
+        let usdt = try await service.verify(transferURI(.usdtEthereum, usdtEthereumAddr, encrypted: "enc-usdt"))
+        XCTAssertEqual(usdt.status, .match)
+        XCTAssertEqual(usdt.matchedDestinations.map(\.type), [.usdtEthereum])
+        XCTAssertFalse(usdt.payments[0].destinations[0].isEncrypted)
+        XCTAssertTrue(usdt.payments[0].destinations[1].isEncrypted)
+
+        client.getImpl = { _, _ in [dualToken()] }
+        let usdc = try await service.verify(transferURI(.usdcEthereum, usdcEthereumAddr, encrypted: "enc-usdt"))
+        XCTAssertEqual(usdc.status, .match)
+        XCTAssertEqual(usdc.matchedDestinations.map(\.type), [.usdcEthereum])
+        XCTAssertTrue(usdc.payments[0].destinations[0].isEncrypted)
+        XCTAssertFalse(usdc.payments[0].destinations[1].isEncrypted)
+
+        client.getImpl = { _, _ in [dualToken()] }
+        let swapped = try await service.verify(transferURI(.usdtEthereum, swappedEvmAddr, encrypted: "enc-usdt"))
+        XCTAssertEqual(swapped.status, .tampered)
     }
 
-    func testBscBindsUsdtLeavesUsdcEncrypted() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [
-                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtBsc),
-                self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcBsc),
-            ])]
-        }
-        aes.decryptImpl = { value, _ in
-            value == "cipher-usdt" ? self.usdtBscAddr : self.usdcBscAddr
-        }
-        let result = try await service.verify(
-            chainURI("bsc", usdtBscAddr, encrypted: "enc-usdt", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .match)
-        XCTAssertEqual(result.matchedDestinations[0].type, .usdtBsc)
-        XCTAssertFalse(result.payments[0].destinations[0].isEncrypted)
-        XCTAssertTrue(result.payments[0].destinations[1].isEncrypted)
-    }
-
-    func testSolBindsUsdtLeavesUsdcEncrypted() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [
-                self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtSolana),
-                self.encrypted("cipher-usdc", id: "zk-usdc", type: .usdcSolana),
-            ])]
-        }
-        aes.decryptImpl = { value, _ in
-            value == "cipher-usdt" ? self.usdtSolanaAddr : self.usdcSolanaAddr
-        }
-        let result = try await service.verify(
-            chainURI("sol", usdtSolanaAddr, encrypted: "enc-usdt", secret: "the-secret")
-        )
-        XCTAssertEqual(result.status, .match)
-        XCTAssertEqual(result.matchedDestinations[0].type, .usdtSolana)
-        XCTAssertFalse(result.payments[0].destinations[0].isEncrypted)
-        XCTAssertTrue(result.payments[0].destinations[1].isEncrypted)
-    }
-
-    func testEthUriWithPolygonOnlyPaymentIsUnknown() async throws {
-        client.getImpl = { _, _ in
-            [Payment(destinations: [self.encrypted("cipher-pol", id: "zk-pol", type: .usdtPolygon)])]
-        }
-        aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
-        let result = try await service.verify(
-            chainURI("eth", usdtEthereumAddr, encrypted: "enc-chain", secret: "the-secret")
-        )
+    func testAUSDCScanAgainstAUSDTOnlyPaymentIsUnknown() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtEthereum)])] }
+        aes.decryptImpl = { _, _ in self.usdtEthereumAddr }
+        let result = try await service.verify(transferURI(.usdcEthereum, usdcEthereumAddr, encrypted: "enc-usdt"))
         XCTAssertEqual(result.status, .unknown)
         XCTAssertTrue(result.matchedDestinations.isEmpty)
     }
 
-    func testBareChainAddressesAndUrisWithoutBrantaParamsAreUnknown() async throws {
-        let eth = try await service.verify(usdtEthereumAddr)
-        let tron = try await service.verify(usdtTronAddr)
-        let ton = try await service.verify(usdtTonAddr)
-        let sol = try await service.verify(usdcSolanaAddr)
-        let ethNoBranta = try await service.verify("eth:\(usdtEthereumAddr)?value=50")
-        let tronNoBranta = try await service.verify("tron:\(usdtTronAddr)")
-        XCTAssertEqual(eth.status, .unknown)
-        XCTAssertEqual(tron.status, .unknown)
-        XCTAssertEqual(ton.status, .unknown)
-        XCTAssertEqual(sol.status, .unknown)
-        XCTAssertEqual(ethNoBranta.status, .unknown)
-        XCTAssertEqual(tronNoBranta.status, .unknown)
+    func testAnEthereumScanDoesNotMatchAPolygonOnlyPayment() async throws {
+        client.getImpl = { _, _ in
+            [Payment(destinations: [self.encrypted("cipher-pol", id: "zk-pol", type: .usdtPolygon)])]
+        }
+        aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
+        let result = try await service.verify(transferURI(.usdtEthereum, usdtEthereumAddr, encrypted: "enc-chain"))
+        XCTAssertEqual(result.status, .unknown)
+        XCTAssertTrue(result.matchedDestinations.isEmpty)
+    }
+
+    func testAnEthereumScanLeavesAPolygonRailInTheSamePaymentEncrypted() async throws {
+        client.getImpl = { _, _ in
+            [Payment(destinations: [
+                self.encrypted("cipher-pol", id: "zk-pol", type: .usdtPolygon),
+                self.encrypted("cipher-eth", id: "zk-eth", type: .usdtEthereum),
+            ])]
+        }
+        aes.decryptImpl = { value, _ in
+            value == "cipher-pol" ? self.usdtPolygonAddr : self.usdtEthereumAddr
+        }
+        let result = try await service.verify(transferURI(.usdtEthereum, usdtEthereumAddr, encrypted: "enc-eth"))
+        XCTAssertEqual(result.status, .match)
+        XCTAssertTrue(result.payments[0].destinations[0].isEncrypted)
+        XCTAssertFalse(result.payments[0].destinations[1].isEncrypted)
+        XCTAssertEqual(result.matchedDestinations.count, 1)
+    }
+
+    // MARK: Forms that do not verify
+
+    func testOtherFunctionsAreUnknownWithoutAGet() async throws {
+        let rail = rail(for: .usdtBase)
+        for function in ["approve", "transferFrom", "transfer;x=1"] {
+            let result = try await service.verify(
+                "ethereum:\(rail.contract)@\(rail.chainID)/\(function)?address=\(swappedEvmAddr)&uint256=1&branta_id=abc&branta_secret=the-secret"
+            )
+            XCTAssertEqual(result.status, .unknown, function)
+        }
         XCTAssertTrue(client.gets.isEmpty)
     }
 
-    func testSolSwappedIsTampered() async throws {
-        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-chain", id: "zk-chain", type: .usdcSolana)])] }
-        aes.decryptImpl = { _, _ in self.usdcSolanaAddr }
+    func testTheAuthorityFormIsUnknownWithoutAGet() async throws {
+        let rail = rail(for: .usdtBase)
         let result = try await service.verify(
-            chainURI("sol", swappedSolanaAddr, encrypted: "enc-chain", secret: "the-secret")
+            "ethereum://\(rail.contract)@\(rail.chainID)/transfer?address=\(swappedEvmAddr)&branta_id=abc&branta_secret=the-secret"
         )
-        XCTAssertEqual(result.status, .tampered)
+        XCTAssertEqual(result.status, .unknown)
+        XCTAssertTrue(client.gets.isEmpty)
     }
+
+    func testUnparseableInputIsUnknownAndDoesNotThrow() async throws {
+        let inputs = [
+            "ethereum://[bad/transfer",
+            "bitcoin://[bad",
+            "ethereum:0xc2132d05d31c914a87c6611c10748aeb04b58e8f@" + String(repeating: "9", count: 5000)
+                + "/transfer?address=" + swappedEvmAddr,
+        ]
+        for input in inputs {
+            let result = try await service.verify(input)
+            XCTAssertEqual(result.status, .unknown, String(input.prefix(40)))
+        }
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    func testRemovedSchemesAreUnknownWithoutAGetEvenWithValidParams() async throws {
+        client.getImpl = { _, _ in [Payment(destinations: [self.encrypted("cipher-usdt", id: "zk-usdt", type: .usdtPolygon)])] }
+        aes.decryptImpl = { _, _ in self.usdtPolygonAddr }
+        for scheme in ["pol", "eth", "bsc", "tron", "ton", "sol"] {
+            let result = try await service.verify(
+                "\(scheme):\(usdtPolygonAddr)?value=50&branta_id=enc-usdt&branta_secret=the-secret"
+            )
+            XCTAssertEqual(result.status, .unknown, scheme)
+        }
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    func testBareChainAddressesAreUnknownWithoutAGet() async throws {
+        for address in [usdtPolygonAddr, usdtEthereumAddr, usdtTronAddr, usdtTonAddr, usdcSolanaAddr] {
+            let result = try await service.verify(address)
+            XCTAssertEqual(result.status, .unknown, address)
+        }
+        XCTAssertTrue(client.gets.isEmpty)
+    }
+
+    // MARK: addPayment
 
     func testAddPaymentEncryptsSecretKeyRailsWithGeneratedSecret() async throws {
         let rails: [(String, DestinationType)] = [
             (usdtPolygonAddr, .usdtPolygon),
             (usdcPolygonAddr, .usdcPolygon),
             (usdtEthereumAddr, .usdtEthereum),
-            (usdtBscAddr, .usdtBsc),
+            (deposit(for: .usdtBsc), .usdtBsc),
+            (deposit(for: .usdcBsc), .usdcBsc),
+            (deposit(for: .usdtBase), .usdtBase),
+            (deposit(for: .usdcBase), .usdcBase),
+            (deposit(for: .usdtArbitrum), .usdtArbitrum),
+            (deposit(for: .usdcArbitrum), .usdcArbitrum),
             (usdtTronAddr, .usdtTron),
             (usdtTonAddr, .usdtTon),
             (usdtSolanaAddr, .usdtSolana),

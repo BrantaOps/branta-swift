@@ -1,7 +1,8 @@
 import XCTest
 @testable import Branta
 
-/// Extra live staging POST→GET combinations beyond the dedicated polygon round-trips.
+/// Extra live staging POST→GET combinations.
+/// Skipped unless BRANTA_RUN_INTEGRATION=1 and BRANTA_API_KEY is set.
 final class LiveStagingCombosTests: XCTestCase {
     override func setUpWithError() throws {
         if ProcessInfo.processInfo.environment["BRANTA_RUN_INTEGRATION"] != "1" {
@@ -33,16 +34,19 @@ final class LiveStagingCombosTests: XCTestCase {
         )
     }
 
-    private func polURI(recipient: String, encrypted: String, secret: String) -> String {
+    private func rail(for type: DestinationType) -> EVMTokenRail {
+        evmTokenRails.first { $0.type == type }!
+    }
+
+    /// ERC-681 transfer URI for one EVM rail, as a wallet would show it.
+    private func transferURI(_ type: DestinationType, recipient: String, encrypted: String, secret: String) -> String {
+        let rail = rail(for: type)
         var components = URLComponents()
         components.queryItems = [
-            URLQueryItem(name: "value", value: "50"),
-            URLQueryItem(name: "user", value: "send"),
-            URLQueryItem(name: "currency", value: "USD"),
             URLQueryItem(name: "branta_id", value: encrypted),
             URLQueryItem(name: "branta_secret", value: secret),
         ]
-        return "pol:\(recipient)?\(components.percentEncodedQuery ?? "")"
+        return "ethereum:\(rail.contract)@\(rail.chainID)/transfer?address=\(recipient)&uint256=1000000&\(components.percentEncodedQuery ?? "")"
     }
 
     private func bitcoinURI(address: String, encrypted: String, secret: String) -> String {
@@ -54,10 +58,6 @@ final class LiveStagingCombosTests: XCTestCase {
         return "bitcoin:\(address)?\(components.percentEncodedQuery ?? "")"
     }
 
-    private func mustAdd(_ svc: BrantaService, _ payment: Payment) async throws -> AddPaymentResult {
-        try await svc.addPayment(payment)
-    }
-
     private func mustStatus(_ svc: BrantaService, _ qr: String, _ want: VerifyStatus) async throws -> VerifyResult {
         let result = try await svc.verify(qr)
         XCTAssertEqual(result.status, want, qr)
@@ -66,10 +66,9 @@ final class LiveStagingCombosTests: XCTestCase {
 
     func testBitcoinRoundTripMatchAndTamper() async throws {
         let svc = service()
-        let added = try await mustAdd(svc, PaymentBuilder()
-            .addDestination(btc, type: .bitcoinAddress)
-            .setTTL(120)
-            .build())
+        let added = try await svc.addPayment(
+            PaymentBuilder().addDestination(btc, type: .bitcoinAddress).setTTL(120).build()
+        )
         let enc = added.payment.destinations[0].value
         let match = try await mustStatus(svc, bitcoinURI(address: btc, encrypted: enc, secret: added.secret), .match)
         XCTAssertEqual(match.matchedDestinations.count, 1)
@@ -80,11 +79,13 @@ final class LiveStagingCombosTests: XCTestCase {
 
     func testUsdtUsdcDifferentAddressesBindOwnRail() async throws {
         let svc = service()
-        let added = try await mustAdd(svc, PaymentBuilder()
-            .addDestination(usdt, type: .usdtPolygon)
-            .addDestination(usdc, type: .usdcPolygon)
-            .setTTL(120)
-            .build())
+        let added = try await svc.addPayment(
+            PaymentBuilder()
+                .addDestination(usdt, type: .usdtPolygon)
+                .addDestination(usdc, type: .usdcPolygon)
+                .setTTL(120)
+                .build()
+        )
         var encUsdt = ""
         var encUsdc = ""
         for destination in added.payment.destinations {
@@ -94,33 +95,56 @@ final class LiveStagingCombosTests: XCTestCase {
             default: break
             }
         }
-        let usdtMatch = try await mustStatus(svc, polURI(recipient: usdt, encrypted: encUsdt, secret: added.secret), .match)
-        XCTAssertEqual(usdtMatch.matchedDestinations.count, 1)
-        XCTAssertEqual(usdtMatch.matchedDestinations[0].type, .usdtPolygon)
-        let usdcMatch = try await mustStatus(svc, polURI(recipient: usdc, encrypted: encUsdc, secret: added.secret), .match)
-        XCTAssertEqual(usdcMatch.matchedDestinations.count, 1)
-        XCTAssertEqual(usdcMatch.matchedDestinations[0].type, .usdcPolygon)
+        let usdtMatch = try await mustStatus(
+            svc, transferURI(.usdtPolygon, recipient: usdt, encrypted: encUsdt, secret: added.secret), .match
+        )
+        XCTAssertEqual(usdtMatch.matchedDestinations.map(\.type), [.usdtPolygon])
+        let usdcMatch = try await mustStatus(
+            svc, transferURI(.usdcPolygon, recipient: usdc, encrypted: encUsdc, secret: added.secret), .match
+        )
+        XCTAssertEqual(usdcMatch.matchedDestinations.map(\.type), [.usdcPolygon])
     }
 
-    func testUsdtUsdcSameAddressBothMatch() async throws {
+    func testSameAddressUnderTwoTokensBindsOnlyTheScannedToken() async throws {
         let svc = service()
-        let added = try await mustAdd(svc, PaymentBuilder()
-            .addDestination(usdt, type: .usdtPolygon)
-            .addDestination(usdt, type: .usdcPolygon)
-            .setTTL(120)
-            .build())
-        let enc = added.payment.destinations[0].value
-        let match = try await mustStatus(svc, polURI(recipient: usdt, encrypted: enc, secret: added.secret), .match)
-        XCTAssertEqual(match.matchedDestinations.count, 2)
+        let added = try await svc.addPayment(
+            PaymentBuilder()
+                .addDestination(usdt, type: .usdtPolygon)
+                .addDestination(usdt, type: .usdcPolygon)
+                .setTTL(120)
+                .build()
+        )
+        var encUsdt = ""
+        var encUsdc = ""
+        for destination in added.payment.destinations {
+            switch destination.type {
+            case .usdtPolygon: encUsdt = destination.value
+            case .usdcPolygon: encUsdc = destination.value
+            default: break
+            }
+        }
+        let usdtMatch = try await mustStatus(
+            svc, transferURI(.usdtPolygon, recipient: usdt, encrypted: encUsdt, secret: added.secret), .match
+        )
+        XCTAssertEqual(usdtMatch.matchedDestinations.map(\.type), [.usdtPolygon])
+        let usdcMatch = try await mustStatus(
+            svc, transferURI(.usdcPolygon, recipient: usdt, encrypted: encUsdc, secret: added.secret), .match
+        )
+        XCTAssertEqual(usdcMatch.matchedDestinations.map(\.type), [.usdcPolygon])
+        _ = try await mustStatus(
+            svc, transferURI(.usdtPolygon, recipient: swap, encrypted: encUsdt, secret: added.secret), .tampered
+        )
     }
 
-    func testBitcoinUsdtSiblingRailsIsolateByScheme() async throws {
+    func testBitcoinAndUsdtSiblingRailsIsolateByType() async throws {
         let svc = service()
-        let added = try await mustAdd(svc, PaymentBuilder()
-            .addDestination(btc, type: .bitcoinAddress)
-            .addDestination(usdt, type: .usdtPolygon)
-            .setTTL(120)
-            .build())
+        let added = try await svc.addPayment(
+            PaymentBuilder()
+                .addDestination(btc, type: .bitcoinAddress)
+                .addDestination(usdt, type: .usdtPolygon)
+                .setTTL(120)
+                .build()
+        )
         var encBtc = ""
         var encUsdt = ""
         for destination in added.payment.destinations {
@@ -130,29 +154,44 @@ final class LiveStagingCombosTests: XCTestCase {
             default: break
             }
         }
-        let btcMatch = try await mustStatus(svc, bitcoinURI(address: btc, encrypted: encBtc, secret: added.secret), .match)
-        XCTAssertEqual(btcMatch.matchedDestinations.count, 1)
-        XCTAssertEqual(btcMatch.matchedDestinations[0].type, .bitcoinAddress)
-        let polMatch = try await mustStatus(svc, polURI(recipient: usdt, encrypted: encUsdt, secret: added.secret), .match)
-        XCTAssertEqual(polMatch.matchedDestinations.count, 1)
-        XCTAssertEqual(polMatch.matchedDestinations[0].type, .usdtPolygon)
-        _ = try await mustStatus(svc, polURI(recipient: swap, encrypted: encUsdt, secret: added.secret), .tampered)
+        let btcMatch = try await mustStatus(
+            svc, bitcoinURI(address: btc, encrypted: encBtc, secret: added.secret), .match
+        )
+        XCTAssertEqual(btcMatch.matchedDestinations.map(\.type), [.bitcoinAddress])
+        XCTAssertEqual(btcMatch.payments[0].destinations.first { $0.type == .usdtPolygon }?.isEncrypted, true)
+
+        let usdtMatch = try await mustStatus(
+            svc, transferURI(.usdtPolygon, recipient: usdt, encrypted: encUsdt, secret: added.secret), .match
+        )
+        XCTAssertEqual(usdtMatch.matchedDestinations.map(\.type), [.usdtPolygon])
+        XCTAssertEqual(usdtMatch.payments[0].destinations.first { $0.type == .bitcoinAddress }?.isEncrypted, true)
+
+        _ = try await mustStatus(
+            svc, transferURI(.usdtPolygon, recipient: swap, encrypted: encUsdt, secret: added.secret), .tampered
+        )
     }
 
-    func testUsdtCaseInsensitiveAndWrongSecretUnknown() async throws {
+    func testUsdtCaseInsensitiveWrongSecretAndRemovedSchemeUnknown() async throws {
         let svc = service()
-        let added = try await mustAdd(svc, PaymentBuilder()
-            .addDestination(usdt, type: .usdtPolygon)
-            .setTTL(120)
-            .build())
+        let added = try await svc.addPayment(
+            PaymentBuilder().addDestination(usdt, type: .usdtPolygon).setTTL(120).build()
+        )
         let enc = added.payment.destinations[0].value
-        _ = try await mustStatus(svc, polURI(recipient: usdt.lowercased(), encrypted: enc, secret: added.secret), .match)
+        _ = try await mustStatus(
+            svc, transferURI(.usdtPolygon, recipient: usdt.lowercased(), encrypted: enc, secret: added.secret), .match
+        )
         _ = try await mustStatus(
             svc,
-            polURI(recipient: usdt, encrypted: enc, secret: "00000000-0000-0000-0000-000000000000"),
+            transferURI(.usdtPolygon, recipient: usdt, encrypted: enc, secret: "00000000-0000-0000-0000-000000000000"),
             .unknown
         )
         _ = try await mustStatus(svc, usdt, .unknown)
-        _ = try await mustStatus(svc, "pol:\(usdt)?value=50&currency=USD", .unknown)
+        // The old pol: scheme no longer verifies, even with valid Branta params.
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "branta_id", value: enc),
+            URLQueryItem(name: "branta_secret", value: added.secret),
+        ]
+        _ = try await mustStatus(svc, "pol:\(usdt)?value=50&\(components.percentEncodedQuery ?? "")", .unknown)
     }
 }

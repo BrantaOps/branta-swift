@@ -2,7 +2,7 @@ import Foundation
 
 struct QRDestination {
     var value: String
-    /// Known rail type when the scheme or payload names one (e.g. bitcoin). Not set for chain URI schemes (`pol:`, `eth:`, …).
+    /// Rail this value belongs to. Set for bitcoin and ERC-681 transfers.
     var type: DestinationType?
     /// Visible address that participates in the secret-key swap check.
     var secretKey: Bool = false
@@ -12,8 +12,9 @@ struct QRParser {
     var destinations: [QRDestination] = []
     var onChainEncryptionText = ""
     var onChainEncryptionSecret = ""
-    /// Destination types `verify` may bind for this QR's scheme (match-if-any).
-    /// Set from the URI scheme — not from a token stamped on the address.
+    /// Destination types this scan may decrypt.
+    /// ERC-681 sets one type from the chain id and token contract.
+    /// Bitcoin sets `bitcoinAddress`.
     var expectedSecretKeyTypes: [DestinationType] = []
     /// A payable instruction this SDK cannot bind to a decrypted destination.
     var hasUnverifiableInstruction = false
@@ -29,10 +30,13 @@ struct QRParser {
         }
 
         let schemeLower = scheme.lowercased()
-        if let secretKeyFamily = secretKeyURIFamilies[schemeLower] {
-            let destValue = extractDestination(text)
-            destinations.append(QRDestination(value: destValue, type: nil, secretKey: true))
-            expectedSecretKeyTypes = secretKeyFamily
+        if schemeLower == "ethereum" {
+            guard let transfer = parseERC681(text) else {
+                destinations.append(QRDestination(value: text, type: nil))
+                return
+            }
+            destinations.append(QRDestination(value: transfer.address, type: transfer.type, secretKey: true))
+            expectedSecretKeyTypes = [transfer.type]
             let query = parseQuery(extractQuery(text))
             onChainEncryptionText = query["branta_id"] ?? ""
             onChainEncryptionSecret = query["branta_secret"] ?? ""
@@ -145,8 +149,10 @@ private func extractDestination(_ text: String) -> String {
 }
 
 private func extractQuery(_ text: String) -> String {
-    guard let colon = text.firstIndex(of: ":") else { return "" }
-    let after = text[text.index(after: colon)...]
+    // A "?" after the "#" belongs to the fragment, not the query.
+    let beforeFragment = text.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? text
+    guard let colon = beforeFragment.firstIndex(of: ":") else { return "" }
+    let after = beforeFragment[beforeFragment.index(after: colon)...]
     guard let question = after.firstIndex(of: "?") else { return "" }
     return String(after[after.index(after: question)...])
 }
@@ -175,4 +181,61 @@ private func parseQuery(_ query: String) -> [String: String] {
 
 private func lightningSchemeType(_ dest: String) -> DestinationType? {
     isBolt11(dest) ? .bolt11 : nil
+}
+
+private func isASCIIDigit(_ byte: UInt8) -> Bool {
+    byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9")
+}
+
+private func isASCIIHex(_ byte: UInt8) -> Bool {
+    isASCIIDigit(byte)
+        || (byte >= UInt8(ascii: "a") && byte <= UInt8(ascii: "f"))
+        || (byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "F"))
+}
+
+/// Path of an `ethereum:` URI, without scheme, query, or fragment. One leading slash is dropped.
+private func erc681Path(_ text: String) -> [UInt8] {
+    var bytes = Array(text.utf8)
+    if let colon = bytes.firstIndex(of: UInt8(ascii: ":")) {
+        bytes = Array(bytes[(colon + 1)...])
+    }
+    if let cut = bytes.firstIndex(where: { $0 == UInt8(ascii: "?") || $0 == UInt8(ascii: "#") }) {
+        bytes = Array(bytes[..<cut])
+    }
+    if bytes.first == UInt8(ascii: "/") {
+        bytes.removeFirst()
+    }
+    return bytes
+}
+
+/// `0x` or `0X` followed by 40 hex digits.
+private func isEVMAddress(_ value: String) -> Bool {
+    let bytes = Array(value.utf8)
+    guard bytes.count == 42, bytes[0] == UInt8(ascii: "0"),
+          bytes[1] == UInt8(ascii: "x") || bytes[1] == UInt8(ascii: "X") else { return false }
+    return bytes[2...].allSatisfy(isASCIIHex)
+}
+
+/// ERC-681 token transfer. Chain id and contract select one destination type.
+/// The deposit address is the `address` query param.
+private func parseERC681(_ text: String) -> (type: DestinationType, address: String)? {
+    let path = erc681Path(text)
+    guard let at = path.firstIndex(of: UInt8(ascii: "@")) else { return nil }
+    let contract = Array(path[..<at])
+    // The contract prefix is a lowercase `0x`, then 40 hex digits.
+    guard contract.count == 42, contract[0] == UInt8(ascii: "0"), contract[1] == UInt8(ascii: "x"),
+          contract[2...].allSatisfy(isASCIIHex) else { return nil }
+    let suffix = Array("/transfer".utf8)
+    let rest = Array(path[(at + 1)...])
+    guard rest.count > suffix.count, rest.suffix(suffix.count).elementsEqual(suffix) else { return nil }
+    let chainBytes = Array(rest.dropLast(suffix.count))
+    guard !chainBytes.isEmpty, chainBytes.allSatisfy(isASCIIDigit) else { return nil }
+    let digits = chainBytes.drop { $0 == UInt8(ascii: "0") }
+    // No supported chain id has more than 15 digits.
+    guard digits.count <= 15 else { return nil }
+    let chainID = digits.isEmpty ? 0 : (Int(String(decoding: digits, as: UTF8.self)) ?? -1)
+    guard chainID >= 0,
+          let type = evmTokenType(chainID: chainID, contract: String(decoding: contract, as: UTF8.self)) else { return nil }
+    guard let address = parseQuery(extractQuery(text))["address"], isEVMAddress(address) else { return nil }
+    return (type, address)
 }

@@ -33,7 +33,7 @@ Do **not** make public: `BrantaClient`, `QRParser`, AES helpers, rail-family lis
 ## Key behaviors
 
 - `verify` is the only lookup. A raw on-chain address (including bare `0x`) is `unknown` and does not GET. `addPayment` encrypts a copy.
-- `DestinationType` is only what `addPayment` accepts: bitcoin, bolt11, ark, silent payment, and the stablecoin rails (`usdt_polygon` … `usdc_solana`). No `usdc_ton` yet. Stablecoin rails use chain URIs (`pol:`, `eth:`, `bsc:`, `tron:`, `ton:`, `sol:`) with `branta_id` / `branta_secret`. Token is on `matchedDestinations[].type`, not the URI scheme.
+- `DestinationType` is only what `addPayment` accepts: bitcoin, bolt11, ark, silent payment, and the stablecoin rails (`usdt_polygon` … `usdc_solana`, including `usdt_base`, `usdc_base`, `usdt_arbitrum`, `usdc_arbitrum`). No `usdc_ton` yet. EVM USDT/USDC verify is ERC-681: `ethereum:<contract>@<chainId>/transfer?address=<deposit>` plus `branta_id` / `branta_secret`. Chain id plus contract select one destination type (`evmTokenRails`, internal). `uint256` is not bound. `pol:`, `eth:`, `bsc:`, `tron:`, `ton:`, and `sol:` do not verify and do not GET. `addPayment` still encrypts `usdt_tron`, `usdt_ton`, `usdt_solana`, and `usdc_solana`. Token is on `matchedDestinations[].type`.
 - `verify` `match` includes `matchedDestinations` — wallets send from that list.
 - `tampered` and `incomplete` are statuses. Do not throw them. Logo-domain mismatches still throw `BrantaPaymentError`. Malformed GET bodies and network/timeouts are `incomplete`.
 - `hmacSecret` is deprecated — shared `apiKey` + `setChildPlatform` is the parent-platform path.
