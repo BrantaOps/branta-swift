@@ -22,7 +22,7 @@ targets: [
 ]
 ```
 
-Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`, from version 4.4.0.
+Or in Xcode: File → Add Package Dependencies → `https://github.com/BrantaOps/branta-swift.git`.
 
 ## Send
 
@@ -93,9 +93,9 @@ BRANTA_RUN_INTEGRATION=1 swift test --filter IntegrationTests
 
 ## Publishing
 
-1. Add a changelog entry and bump the version in the Installation section.
-2. Tag the release `v4.4.0` (the `v` prefix). Swift Package Manager resolves `from: "4.4.0"` from that tag.
-3. Push the tag: `git push origin v4.4.0`
+1. Add a changelog entry.
+2. Tag the release `vX.Y.Z` (the `v` prefix). Swift Package Manager resolves versions from the tag.
+3. Push the tag: `git push origin vX.Y.Z`
 
 ## Responsible Disclosure
 
