@@ -4,11 +4,6 @@ Swift SDK for the [Branta](https://developer.branta.pro) V2 API. For native iOS 
 
 Use `verify` on send and `addPayment` on receive. Status handling and parent platforms are in the [developer docs](https://developer.branta.pro).
 
-## Requirements
-
-- iOS 15 or macOS 12
-- Swift 5.9
-
 ## Install
 
 Swift Package Manager, in `Package.swift`:
@@ -74,19 +69,10 @@ let payment = PaymentBuilder()
 let added = try await service.addPayment(payment)
 ```
 
-`addPayment` encrypts a copy. The `Payment` you pass in stays plaintext, so a failed post can be retried with the same value.
-
 Store `added.secret` with the invoice. Put `branta_id` and `branta_secret` on the invoice QR (`bitcoin:…` or the ERC-681 `ethereum:…` URI). `added.verifyURL` is the link for the wallet.
 
 ## Destination types
 
 `addPayment` accepts the types on [Destination types](https://developer.branta.pro/destination-types), and [Encryption](https://developer.branta.pro/setup/receive/encryption) says which key each uses. `usdtTron`, `usdtTon`, `usdtSolana`, and `usdcSolana` also encrypt and post, but no URI verifies them.
-
-## Development
-
-```bash
-swift test
-BRANTA_RUN_INTEGRATION=1 swift test --filter IntegrationTests
-```
 
 [Security](SECURITY.md)

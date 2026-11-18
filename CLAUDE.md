@@ -26,6 +26,7 @@ Invariants that break silently. Check them before you change `verify` or `addPay
 
 ```bash
 swift test
+BRANTA_RUN_INTEGRATION=1 swift test --filter IntegrationTests
 BRANTA_RUN_INTEGRATION=1 BRANTA_API_KEY=… swift test --filter MultiRailRoundTripTests
 ```
 
