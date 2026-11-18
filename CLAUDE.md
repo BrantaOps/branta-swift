@@ -26,10 +26,13 @@ Invariants that break silently. Check them before you change `verify` or `addPay
 
 ```bash
 swift test
+BRANTA_RUN_INTEGRATION=1 swift test --filter IntegrationTests
 BRANTA_RUN_INTEGRATION=1 BRANTA_API_KEY=… swift test --filter MultiRailRoundTripTests
 ```
 
 Live write/lookup tests run only when `BRANTA_RUN_INTEGRATION=1` (and `BRANTA_API_KEY` for POST).
+
+Release: add a `CHANGELOG.md` entry, then tag the release commit `vX.Y.Z` (with the `v` prefix) and push the tag. Swift Package Manager resolves versions from the tag, so there is nothing to publish. Do not tag until asked.
 
 ## Layout
 
