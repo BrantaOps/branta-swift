@@ -33,8 +33,7 @@ let result = try await service.verify(input) // scanned QR or pasted text
 switch result.status {
 case .match:
     // Show the card for result.payments[0]. Link it to result.verifyURL.
-    // For EVM stablecoins, token is on result.matchedDestinations[i].type
-    // (e.g. .usdcBase). Pay from that list.
+    // For EVM stablecoins, token is on result.matchedDestinations[i].type. Pay from that list.
 case .unknown:
     // Not in Branta. Show nothing.
 case .tampered:
