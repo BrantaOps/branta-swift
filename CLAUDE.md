@@ -39,16 +39,3 @@ Release: add a `CHANGELOG.md` entry, then tag the release commit `vX.Y.Z` (with 
 Public API is whatever the `Branta` module exposes: `BrantaService`, `PaymentBuilder`, `BrantaApiOptions`, `BrantaEnvironment`, `DestinationType`, `VerifyStatus`, `VerifyResult`, `AddPaymentResult`, payment models, and `BrantaPaymentError`.
 
 Do **not** make public: `BrantaClient`, `QRParser`, AES helpers, the EVM rail table (`evmTokenRails`, `evmTokenType`), or `isSecretKeyAddressType`. Prefer package-internal (`internal`) for those. `PublicAPITests` uses `import Branta` (not `@testable`) to lock the consumer surface.
-
-| File | Role |
-|------|------|
-| `Service.swift` | Encrypt/decrypt orchestration around HTTP. Do not export the client. |
-| `Client.swift` | Raw HTTP. Timeouts map transport failures to incomplete on GET. |
-| `DestinationTypes.swift` | `DestinationType`, verify statuses, and the EVM rail table (internal). |
-| `Options.swift` | Environment, `BrantaApiOptions`, errors. |
-| `Models.swift` | Payment / destination / result types. |
-| `WireCoding.swift` | JSON encode/decode. |
-| `QRParser.swift` | QR / URI parsing (internal). |
-| `PaymentBuilder.swift` | Fluent `Payment` construction. |
-| `Encoding.swift` | Hash, percent-encoding, HMAC, origin checks. |
-| `AES.swift` | Crypto primitives (internal). |
