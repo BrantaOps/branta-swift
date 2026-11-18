@@ -1,6 +1,6 @@
 # Branta Swift SDK
 
-Swift SDK for the [Branta](https://developer.branta.pro) V2 API. For native iOS and macOS apps.
+Swift SDK for [Branta](https://developer.branta.pro). For native iOS and macOS apps.
 
 Status handling and parent platforms are in the [developer docs](https://developer.branta.pro).
 
