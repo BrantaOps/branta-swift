@@ -13,30 +13,19 @@ public enum BrantaEnvironment: String, Sendable, Equatable {
 public struct BrantaApiOptions: Sendable, Equatable {
     public var environment: BrantaEnvironment?
     public var apiKey: String?
-    /// Deprecated parent-platform HMAC. Prefer a shared `apiKey` plus `PaymentBuilder.setChildPlatform`.
-    @available(*, deprecated, message: "Use a shared apiKey with PaymentBuilder.setChildPlatform instead.")
-    public var hmacSecret: String? {
-        get { _hmacSecret }
-        set { _hmacSecret = newValue }
-    }
+    /// Secret from the Secrets tab in Guardrail. Signs `POST /v2/payments` with `X-HMAC-Signature` and
+    /// `X-HMAC-Timestamp`. Needed when your platform has Require HMAC on. Server-side only.
+    /// See https://developer.branta.pro/setup/receive/hmac-signing
+    public var hmacSecret: String?
 
-    var _hmacSecret: String?
-
-    public init(environment: BrantaEnvironment? = nil, apiKey: String? = nil) {
-        self.environment = environment
-        self.apiKey = apiKey
-        self._hmacSecret = nil
-    }
-
-    @available(*, deprecated, message: "Use a shared apiKey with PaymentBuilder.setChildPlatform instead.")
     public init(
         environment: BrantaEnvironment? = nil,
         apiKey: String? = nil,
-        hmacSecret: String?
+        hmacSecret: String? = nil
     ) {
         self.environment = environment
         self.apiKey = apiKey
-        self._hmacSecret = hmacSecret
+        self.hmacSecret = hmacSecret
     }
 }
 
@@ -73,7 +62,7 @@ func resolvedAPIKey(defaults: BrantaApiOptions?, override: BrantaApiOptions?) ->
 }
 
 func resolvedHMACSecret(defaults: BrantaApiOptions?, override: BrantaApiOptions?) -> String? {
-    if let secret = override?._hmacSecret, !secret.isEmpty { return secret }
-    if let secret = defaults?._hmacSecret, !secret.isEmpty { return secret }
+    if let secret = override?.hmacSecret, !secret.isEmpty { return secret }
+    if let secret = defaults?.hmacSecret, !secret.isEmpty { return secret }
     return nil
 }

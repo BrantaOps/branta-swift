@@ -140,7 +140,7 @@ final class ClientTests: XCTestCase {
     func testHMACSignsTheRawBody() async throws {
         let transport = StubTransport(body: "null", statusCode: 200)
         var options = BrantaApiOptions(environment: .localhost, apiKey: "key")
-        options._hmacSecret = "test-secret"
+        options.hmacSecret = "test-secret"
         let client = BrantaClient(defaultOptions: options, transport: transport)
         client.timestamp = { "1700000000" }
         let payment = Payment(destinations: [Destination(value: "abc")], ttl: 0)
