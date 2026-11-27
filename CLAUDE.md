@@ -13,6 +13,7 @@ Invariants that break silently. Check them before you change `verify` or `addPay
 - The token is `matchedDestinations[].type`, never the URI scheme.
 - A logo-domain mismatch throws. Every other lookup failure is a status.
 - `addPayment` encrypts a copy and leaves the caller's `Payment` unchanged.
+- The payment POST sends `X-Branta-SDK: <language>/<version>`. A GET never does. [SDK header](https://developer.branta.pro/tech/api/receive#sdk-header)
 - Keep parity with every 4.x Branta SDK. A public method added or changed here is mirrored in each of them.
 
 ## Swift specifics
@@ -32,7 +33,7 @@ BRANTA_RUN_INTEGRATION=1 BRANTA_API_KEY=… swift test --filter MultiRailRoundTr
 
 Live write/lookup tests run only when `BRANTA_RUN_INTEGRATION=1` (and `BRANTA_API_KEY` for POST).
 
-Release: add a `CHANGELOG.md` entry, then tag the release commit `vX.Y.Z` (with the `v` prefix) and push the tag. Swift Package Manager resolves versions from the tag, so there is nothing to publish. Do not tag until asked.
+Release: bump `SDKInfo.version` in `Sources/Branta/SDKInfo.swift`, add a `CHANGELOG.md` entry with the same version (a test checks they match), then tag the release commit `vX.Y.Z` (with the `v` prefix) and push the tag. Swift Package Manager resolves versions from the tag, so there is nothing to publish. Do not tag until asked.
 
 ## Layout
 
