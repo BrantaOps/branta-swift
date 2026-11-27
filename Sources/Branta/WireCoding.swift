@@ -40,7 +40,7 @@ enum WireCoding {
         if let platform = payment.platform { object["platform"] = platform }
         if let logo = payment.platformLogoURL { object["platform_logo_url"] = logo }
         if let logo = payment.platformLogoLightURL { object["platform_logo_light_url"] = logo }
-        if let child = payment.childPlatform { object["child_platform"] = platformObject(child) }
+        if let brand = payment.effectiveBrand { object["brand"] = platformObject(brand) }
         return object
     }
 
@@ -80,6 +80,7 @@ enum WireCoding {
             }
             return destination(from: dictionary)
         }
+        let brand = platform(from: object["brand"]) ?? platform(from: object["child_platform"])
         return Payment(
             description: object["description"] as? String,
             destinations: destinations,
@@ -90,7 +91,7 @@ enum WireCoding {
             platformLogoURL: object["platform_logo_url"] as? String,
             platformLogoLightURL: object["platform_logo_light_url"] as? String,
             parentPlatform: platform(from: object["parent_platform"]),
-            childPlatform: platform(from: object["child_platform"])
+            brand: brand
         )
     }
 

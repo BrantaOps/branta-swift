@@ -396,7 +396,7 @@ final class PaymentBuilderTests: XCTestCase {
             .addMetadata(key: "name", value: "Alice")
             .setTTL(600)
             .setPlatformLogoURL("https://example.com/logo.png")
-            .setChildPlatform(name: "ChildBrand", logoURL: "https://child.com/logo.png")
+            .setBrand(name: "ChildBrand", logoURL: "https://child.com/logo.png")
             .build()
         XCTAssertEqual(payment.description, "Test description")
         XCTAssertTrue(payment.metadata?.contains("email") == true)
@@ -404,8 +404,8 @@ final class PaymentBuilderTests: XCTestCase {
         XCTAssertTrue(payment.metadata?.contains("name") == true)
         XCTAssertEqual(payment.ttl, 600)
         XCTAssertEqual(payment.platformLogoURL, "https://example.com/logo.png")
-        XCTAssertEqual(payment.childPlatform?.name, "ChildBrand")
-        XCTAssertEqual(payment.childPlatform?.logoURL, "https://child.com/logo.png")
+        XCTAssertEqual(payment.brand?.name, "ChildBrand")
+        XCTAssertEqual(payment.brand?.logoURL, "https://child.com/logo.png")
     }
 }
 
@@ -442,14 +442,15 @@ final class WireFormatTests: XCTestCase {
             platform: "Acme",
             platformLogoURL: "https://example.com/logo.png",
             parentPlatform: Platform(name: "Parent"),
-            childPlatform: Platform(name: "Child"),
+            brand: Platform(name: "Child"),
             isMetadataDecrypted: true
         )
         let object = try jsonObject(WireCoding.encode(payment))
         XCTAssertEqual(object["ttl"] as? Int, 600)
         XCTAssertNil(object["description"])
         XCTAssertNil(object["btc_pay_server_plugin_version"])
-        XCTAssertEqual((object["child_platform"] as? [String: Any])?["name"] as? String, "Child")
+        XCTAssertEqual((object["brand"] as? [String: Any])?["name"] as? String, "Child")
+        XCTAssertNil(object["child_platform"])
         XCTAssertNil(object["parent_platform"])
         XCTAssertNil(object["is_metadata_decrypted"])
     }
