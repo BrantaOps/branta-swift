@@ -154,6 +154,48 @@ final class ClientTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer key")
     }
 
+    func testPostSendsSDKHeaderAndGetsDoNot() async throws {
+        let transport = StubTransport(body: "null", statusCode: 200)
+        var options = BrantaApiOptions(environment: .localhost, apiKey: "key")
+        options.hmacSecret = "test-secret"
+        let client = BrantaClient(defaultOptions: options, transport: transport)
+        client.timestamp = { "1700000000" }
+        _ = try await client.postPayment(Payment(destinations: [Destination(value: "abc")]), options: nil)
+        let post = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(post.value(forHTTPHeaderField: "X-Branta-SDK"), "swift/\(SDKInfo.version)")
+        // Header only: not in the body, not in the HMAC input.
+        let body = String(data: post.httpBody ?? Data(), encoding: .utf8) ?? ""
+        XCTAssertFalse(body.contains("swift/"))
+        let message = "POST|http://localhost:3000/v2/payments|\(body)|1700000000"
+        XCTAssertEqual(post.value(forHTTPHeaderField: "X-HMAC-Signature"), hmacSHA256Hex(secret: "test-secret", message: message))
+
+        transport.body = Data("[]".utf8)
+        _ = try await client.getPayments(destinationValue: "abc", options: nil)
+        _ = try await client.isAPIKeyValid(options: nil)
+        XCTAssertEqual(transport.requests.count, 3)
+        XCTAssertEqual(transport.requests[1].httpMethod, "GET")
+        XCTAssertEqual(transport.requests[2].httpMethod, "GET")
+        XCTAssertNil(transport.requests[1].value(forHTTPHeaderField: "X-Branta-SDK"))
+        XCTAssertNil(transport.requests[2].value(forHTTPHeaderField: "X-Branta-SDK"))
+    }
+
+    func testSDKVersionIsWellFormedAndMatchesChangelog() throws {
+        let parts = SDKInfo.version.split(separator: ".", omittingEmptySubsequences: false)
+        XCTAssertEqual(parts.count, 3)
+        XCTAssertTrue(parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }, SDKInfo.version)
+
+        // CHANGELOG.md sits at the package root, three levels above this file.
+        let changelog = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("CHANGELOG.md")
+        let text = try String(contentsOf: changelog, encoding: .utf8)
+        let regex = try NSRegularExpression(pattern: #"^## \[(\d+\.\d+\.\d+)\]"#, options: .anchorsMatchLines)
+        let range = NSRange(text.startIndex..., in: text)
+        let match = try XCTUnwrap(regex.firstMatch(in: text, range: range))
+        let latest = String(text[try XCTUnwrap(Range(match.range(at: 1), in: text))])
+        XCTAssertEqual(SDKInfo.version, latest, "Bump SDKInfo.version when adding a release to CHANGELOG.md")
+    }
+
     func testPostFailureUsesStatusCode() async {
         let transport = StubTransport(body: "", statusCode: 401)
         let client = BrantaClient(

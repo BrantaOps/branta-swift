@@ -99,6 +99,7 @@ final class BrantaClient: BrantaClienting {
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(SDKInfo.headerValue, forHTTPHeaderField: "X-Branta-SDK")
 
         if let hmacSecret = resolvedHMACSecret(defaults: defaultOptions, override: options) {
             let stamp = timestamp()
