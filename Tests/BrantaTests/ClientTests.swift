@@ -56,8 +56,10 @@ final class ClientTests: XCTestCase {
             (#"[{"destinations": \#(destinations), "platform_logo_light_url": "\#(otherOrigin)/logo-light.png"}]"#, "platformLogoLightURL"),
             (#"[{"destinations": \#(destinations), "parent_platform": {"logo_url": "\#(otherOrigin)/logo.png"}}]"#, "parentPlatform.logoURL"),
             (#"[{"destinations": \#(destinations), "parent_platform": {"logo_light_url": "\#(otherOrigin)/logo-light.png"}}]"#, "parentPlatform.logoLightURL"),
-            (#"[{"destinations": \#(destinations), "child_platform": {"logo_url": "\#(otherOrigin)/logo.png"}}]"#, "childPlatform.logoURL"),
-            (#"[{"destinations": \#(destinations), "child_platform": {"logo_light_url": "\#(otherOrigin)/logo-light.png"}}]"#, "childPlatform.logoLightURL"),
+            (#"[{"destinations": \#(destinations), "brand": {"logo_url": "\#(otherOrigin)/logo.png"}}]"#, "brand.logoURL"),
+            (#"[{"destinations": \#(destinations), "brand": {"logo_light_url": "\#(otherOrigin)/logo-light.png"}}]"#, "brand.logoLightURL"),
+            (#"[{"destinations": \#(destinations), "child_platform": {"logo_url": "\#(otherOrigin)/logo.png"}}]"#, "brand.logoURL"),
+            (#"[{"destinations": \#(destinations), "child_platform": {"logo_light_url": "\#(otherOrigin)/logo-light.png"}}]"#, "brand.logoLightURL"),
         ]
         for (json, field) in cases {
             do {
@@ -77,13 +79,14 @@ final class ClientTests: XCTestCase {
             "platform_logo_url": "\(sameOrigin)/a.png",
             "platform_logo_light_url": "\(sameOrigin)/b.png",
             "parent_platform": {"logo_url": "\(sameOrigin)/c.png", "logo_light_url": "\(sameOrigin)/d.png"},
-            "child_platform": {"logo_url": "\(sameOrigin)/e.png"}
+            "brand": {"logo_url": "\(sameOrigin)/e.png"}
           },
+          {"destinations": \(destinations), "child_platform": {"logo_url": "\(sameOrigin)/f.png"}},
           {"destinations": \(destinations)}
         ]
         """
         let payments = try await client(json: json).0.getPayments(destinationValue: "value", options: nil)
-        XCTAssertEqual(payments.count, 2)
+        XCTAssertEqual(payments.count, 3)
     }
 
     func testNotFoundIsEmptyAndOtherErrorsAreIncomplete() async throws {

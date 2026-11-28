@@ -6,7 +6,7 @@ public final class PaymentBuilder {
     private var metadata: String?
     private var ttl: Int = 0
     private var platformLogoURL: String?
-    private var childPlatform: Platform?
+    private var brand: Platform?
 
     public init() {}
 
@@ -52,10 +52,18 @@ public final class PaymentBuilder {
         return self
     }
 
+    /// The payee a shared-key platform tags the payment with. Sent as `brand`.
+    @discardableResult
+    public func setBrand(name: String, logoURL: String? = nil, logoLightURL: String? = nil) -> PaymentBuilder {
+        brand = Platform(name: name, logoURL: logoURL, logoLightURL: logoLightURL)
+        return self
+    }
+
+    /// Deprecated alias. Delegates to `setBrand`.
+    @available(*, deprecated, renamed: "setBrand")
     @discardableResult
     public func setChildPlatform(name: String, logoURL: String? = nil, logoLightURL: String? = nil) -> PaymentBuilder {
-        childPlatform = Platform(name: name, logoURL: logoURL, logoLightURL: logoLightURL)
-        return self
+        setBrand(name: name, logoURL: logoURL, logoLightURL: logoLightURL)
     }
 
     public func build() -> Payment {
@@ -65,7 +73,7 @@ public final class PaymentBuilder {
             ttl: ttl,
             metadata: metadata,
             platformLogoURL: platformLogoURL,
-            childPlatform: childPlatform
+            brand: brand
         )
     }
 }

@@ -59,6 +59,7 @@ let payment = PaymentBuilder()
     .setDescription("Invoice #12345")
     .addDestination("bc1q…", type: .bitcoinAddress)
     .setTTL(600)
+    .setBrand(name: "Acme", logoURL: "https://example.com/logo.png") // optional: payee tag for shared-key platforms
     .build()
 
 let added = try await service.addPayment(payment)
@@ -67,6 +68,8 @@ let added = try await service.addPayment(payment)
 ```
 
 `addPayment` accepts the types on [Destination types](https://developer.branta.pro/destination-types). Pass the type for stablecoins. A bare address is not auto-detected. `usdtTron`, `usdtTon`, `usdtSolana`, and `usdcSolana` also encrypt and post, but no URI verifies them.
+
+`setChildPlatform` and `Payment.childPlatform` are the deprecated old names for `setBrand` and `Payment.brand`. They still work, but the request always sends `brand`.
 
 ### HMAC signing
 

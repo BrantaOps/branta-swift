@@ -21,7 +21,8 @@ Invariants that break silently. Check them before you change `verify` or `addPay
 - A logo-domain mismatch throws `BrantaPaymentError` (not `Exception`).
 - Acronym casing follows Swift: `verifyURL`, `isAPIKeyValid`.
 - `DestinationType` is only what `addPayment` accepts. It also includes `usdt_tron`, `usdt_ton`, `usdt_solana`, and `usdc_solana`. They can be posted but no URI verifies them, and they are not on the public Destination types page. There is no `usdc_ton`.
-- `hmacSecret` signs `POST /v2/payments` for platforms with Require HMAC on. It is not deprecated. For parent platforms, a shared `apiKey` plus `setChildPlatform` replaces the deprecated per-client HMAC flow.
+- `hmacSecret` signs `POST /v2/payments` for platforms with Require HMAC on. It is not deprecated. For parent platforms, a shared `apiKey` plus `setBrand` replaces the deprecated per-client HMAC flow.
+- `setBrand` is the method and the wire field is `brand` (`name`, `logo_url`, `logo_light_url`). `setChildPlatform` and `Payment.childPlatform` stay only as `@available(*, deprecated)` aliases. The alias delegates to `setBrand`. Never send `child_platform`. Parsing accepts `brand` or `child_platform` (`brand` wins). Internal code uses `effectiveBrand` and never calls the deprecated names.
 
 ## Commands
 

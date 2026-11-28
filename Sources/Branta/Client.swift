@@ -149,8 +149,8 @@ final class BrantaClient: BrantaClienting {
             try check(payment.platformLogoLightURL, "platformLogoLightURL")
             try check(payment.parentPlatform?.logoURL, "parentPlatform.logoURL")
             try check(payment.parentPlatform?.logoLightURL, "parentPlatform.logoLightURL")
-            try check(payment.childPlatform?.logoURL, "childPlatform.logoURL")
-            try check(payment.childPlatform?.logoLightURL, "childPlatform.logoLightURL")
+            try check(payment.effectiveBrand?.logoURL, "brand.logoURL")
+            try check(payment.effectiveBrand?.logoLightURL, "brand.logoLightURL")
         }
     }
 }

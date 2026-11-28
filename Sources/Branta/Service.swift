@@ -55,6 +55,9 @@ public final class BrantaService {
     /// Encrypts a copy of `payment` and posts that copy. A failed post leaves the caller's payment plaintext.
     public func addPayment(_ payment: Payment, options: BrantaApiOptions? = nil) async throws -> AddPaymentResult {
         var submitted = payment
+        // Normalize an old-style `childPlatform` into `brand` on the copy only.
+        submitted.brand = submitted.effectiveBrand
+        submitted.legacyChildPlatform = nil
         foldDescriptionIntoMetadata(&submitted)
 
         var dek: String?

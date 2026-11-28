@@ -52,7 +52,18 @@ public struct Payment: Sendable {
     public var platformLogoLightURL: String?
     /// Deserialize-only. The server sets this; a POST never sends it.
     public var parentPlatform: Platform?
-    public var childPlatform: Platform?
+    /// Payee the platform tags the payment with. Sent as `brand` on the wire.
+    public var brand: Platform?
+    /// Backing storage for the deprecated `childPlatform` property. Internal code reads and writes this, never the deprecated name.
+    var legacyChildPlatform: Platform?
+    /// Deprecated name for `brand`. Reads the effective brand (`brand`, else the value last assigned here). Assigning it stores a fallback that is used only while `brand` is nil.
+    @available(*, deprecated, renamed: "brand")
+    public var childPlatform: Platform? {
+        get { effectiveBrand }
+        set { legacyChildPlatform = newValue }
+    }
+    /// `brand` if set, otherwise the deprecated `childPlatform`.
+    var effectiveBrand: Platform? { brand ?? legacyChildPlatform }
     /// Client-side only. True after metadata was decrypted with a destination DEK.
     public var isMetadataDecrypted: Bool
 
@@ -66,7 +77,7 @@ public struct Payment: Sendable {
         platformLogoURL: String? = nil,
         platformLogoLightURL: String? = nil,
         parentPlatform: Platform? = nil,
-        childPlatform: Platform? = nil,
+        brand: Platform? = nil,
         isMetadataDecrypted: Bool = false
     ) {
         self.description = description
@@ -78,8 +89,40 @@ public struct Payment: Sendable {
         self.platformLogoURL = platformLogoURL
         self.platformLogoLightURL = platformLogoLightURL
         self.parentPlatform = parentPlatform
-        self.childPlatform = childPlatform
+        self.brand = brand
         self.isMetadataDecrypted = isMetadataDecrypted
+    }
+
+    /// Deprecated: use `init(...brand:...)`. `childPlatform` is required here so calls that omit it resolve to the main initializer.
+    @available(*, deprecated, message: "Use brand instead of childPlatform.")
+    public init(
+        description: String? = nil,
+        destinations: [Destination] = [],
+        createdAt: String? = nil,
+        ttl: Int = 0,
+        metadata: String? = nil,
+        platform: String? = nil,
+        platformLogoURL: String? = nil,
+        platformLogoLightURL: String? = nil,
+        parentPlatform: Platform? = nil,
+        brand: Platform? = nil,
+        childPlatform: Platform?,
+        isMetadataDecrypted: Bool = false
+    ) {
+        self.init(
+            description: description,
+            destinations: destinations,
+            createdAt: createdAt,
+            ttl: ttl,
+            metadata: metadata,
+            platform: platform,
+            platformLogoURL: platformLogoURL,
+            platformLogoLightURL: platformLogoLightURL,
+            parentPlatform: parentPlatform,
+            brand: brand,
+            isMetadataDecrypted: isMetadataDecrypted
+        )
+        self.legacyChildPlatform = childPlatform
     }
 }
 
